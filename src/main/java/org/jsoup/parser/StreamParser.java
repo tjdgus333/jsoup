@@ -323,7 +323,7 @@ public class StreamParser implements Closeable {
     }
 
     final class ElementIterator implements Iterator<Element>, NodeVisitor {
-        final private Queue<Element> emitQueue = new LinkedList<>(); // ready elements waiting for iterator delivery, in emission order
+        private final Queue<Element> emitQueue = new LinkedList<>(); // ready elements waiting for iterator delivery, in emission order
         final private HashSet<Element> deferredEls = new HashSet<>(); // off-stack elements not yet ready for emission
         private @Nullable Element current;  // most recently emitted
         private @Nullable Element next;     // element waiting to be picked up
@@ -449,3 +449,4 @@ public class StreamParser implements Closeable {
         }
     }
 }
+
