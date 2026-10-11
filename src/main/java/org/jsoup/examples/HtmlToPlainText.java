@@ -85,6 +85,7 @@ public class HtmlToPlainText {
         }
 
         // hit when all of the node's children (if any) have been visited
+        @Override
         public void tail(Node node, int depth) {
             String name = node.nodeName();
             if (StringUtil.in(name, "br", "dd", "dt", "p", "h1", "h2", "h3", "h4", "h5"))
@@ -128,3 +129,4 @@ public class HtmlToPlainText {
         }
     }
 }
+
