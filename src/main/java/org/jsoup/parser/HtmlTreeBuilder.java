@@ -1068,7 +1068,9 @@ public class HtmlTreeBuilder extends TreeBuilder {
                 '}';
     }
 
+    @Override
     protected boolean isContentForTagData(final String normalName) {
         return (normalName.equals("script") || normalName.equals("style"));
     }
 }
+
