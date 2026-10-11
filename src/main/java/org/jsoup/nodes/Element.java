@@ -170,6 +170,7 @@ public class Element extends Node {
      * normal name of {@code div}.
      * @return normal name
      */
+    @Override
     public String normalName() {
         return tag.normalName();
     }
@@ -1891,3 +1892,4 @@ public class Element extends Node {
             && !isNode("br");
     }
 }
+
