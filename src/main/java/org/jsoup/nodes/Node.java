@@ -904,6 +904,7 @@ public abstract class Node implements Cloneable {
 			}
         }
 
+        @Override
         public void tail(Node node, int depth) {
             if (!node.nodeName().equals("#text")) { // saves a void hit.
 				try {
@@ -915,3 +916,4 @@ public abstract class Node implements Cloneable {
         }
     }
 }
+
