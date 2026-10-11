@@ -248,6 +248,7 @@ public class Element extends Node {
      *
      * @return this element
      */
+    @Override
     public Element attr(String attributeKey, String attributeValue) {
         super.attr(attributeKey, attributeValue);
         return this;
