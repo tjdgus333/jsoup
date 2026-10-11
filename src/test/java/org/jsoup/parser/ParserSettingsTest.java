@@ -48,7 +48,8 @@ public class ParserSettingsTest {
         Attributes attributes = new Attributes();
         attributes.put("ITEM", "1");
 
-        parseSettings.normalizeAttributes(attributes);
-        assertEquals("item", attributes.asList().get(0).getKey());
+        Attributes normalizedAttributes = parseSettings.normalizeAttributes(attributes);
+
+        assertEquals("item", normalizedAttributes.asList().get(0).getKey());
     }
 }

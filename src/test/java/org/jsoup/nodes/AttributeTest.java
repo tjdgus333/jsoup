@@ -6,7 +6,6 @@ import org.jsoup.parser.Parser;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class AttributeTest {
     @Test
@@ -14,12 +13,6 @@ public class AttributeTest {
         Attribute attr = new Attribute("key", "value &");
         assertEquals("key=\"value &amp;\"", attr.html());
         assertEquals(attr.html(), attr.toString());
-    }
-
-    @Test
-    public void htmlWithLtAndGtInValue() {
-        Attribute attr = new Attribute("key", "<value>");
-        assertEquals("key=\"&lt;value&gt;\"", attr.html());
     }
 
     @Test public void testWithSupplementaryCharacterInAttributeKeyAndValue() {
@@ -62,21 +55,6 @@ public class AttributeTest {
         assertNull(attr.parent);
     }
 
-    @Test void settersAfterParentRemoval() {
-        // tests key and value set on a retained attribute after disconnected from parent
-        Attributes attrs = new Attributes();
-        attrs.put("foo", "bar");
-        Attribute attr = attrs.attribute("foo");
-        assertNotNull(attr);
-        attrs.remove("foo");
-        assertEquals("foo", attr.getKey());
-        assertEquals("bar", attr.getValue());
-        attr.setKey("new");
-        attr.setValue("newer");
-        assertEquals("new", attr.getKey());
-        assertEquals("newer", attr.getValue());
-    }
-
     @Test public void hasValue() {
         Attribute a1 = new Attribute("one", "");
         Attribute a2 = new Attribute("two", null);
@@ -111,18 +89,4 @@ public class AttributeTest {
         Document doc2 = Jsoup.parse(html, Parser.htmlParser().settings(ParseSettings.preserveCase));
         assertEquals("<a href=\"autofocus\" REQUIRED>One</a>", doc2.selectFirst("a").outerHtml());
     }
-
-    @Test void orphanNamespace() {
-        Attribute attr = new Attribute("one", "two");
-        assertEquals("", attr.namespace());
-    }
-
-    @Test void trimsWhitespaceButPreservesNameControls() {
-        Attribute attr = new Attribute(" \tDATA-X\u0001\n", "one");
-        assertEquals("DATA-X\u0001", attr.getKey());
-        attr.setKey(" \r\u0001\f");
-        assertEquals("\u0001", attr.getKey());
-        assertEquals("_=\"one\"", attr.html()); // serialization still repairs invalid HTML names
-    }
-
 }

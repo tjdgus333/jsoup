@@ -2,7 +2,6 @@ package org.jsoup.nodes;
 
 import org.jsoup.Jsoup;
 import org.jsoup.TextUtil;
-import org.jsoup.helper.ValidationException;
 import org.jsoup.parser.Tag;
 import org.jsoup.select.Elements;
 import org.jsoup.select.NodeVisitor;
@@ -10,7 +9,6 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-import static org.jsoup.parser.Parser.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -176,95 +174,6 @@ public class NodeTest {
         assertEquals("One <em>foo</em> three", p.html());
     }
 
-    @Test public void testReplaceTwice() {
-        // https://github.com/jhy/jsoup/issues/2212
-        Document doc = Jsoup.parse("<p><span>Child One</span><span>Child Two</span><span>Child Three</span><span>Child Four</span></p>");
-        Elements children = doc.select("p").first().children();
-        // first swap 0 and 1
-        children.set(0,  children.set(1, children.get(0)));
-        // then swap 1 and 2
-        children.set(2, children.set(1, children.get(2)));
-
-        assertEquals("Child TwoChild ThreeChild OneChild Four",
-                TextUtil.stripNewlines(children.html()));
-    }
-
-    @Test void rejectsSelfParenting() {
-        Element element = new Element("div");
-
-        ValidationException exception = assertThrows(ValidationException.class, () -> element.appendChild(element));
-        assertEquals("Cannot add a node here because it would create a cycle.", exception.getMessage());
-        assertNull(element.parent());
-        assertEquals(0, element.childNodeSize());
-    }
-
-    @Test void rejectsAncestorAsChild() {
-        Element root = new Element("root");
-        Element child = root.appendElement("child");
-        Element descendant = child.appendElement("descendant");
-        String originalHtml = root.outerHtml();
-
-        assertThrows(ValidationException.class, () -> descendant.appendChild(root));
-        assertEquals(originalHtml, root.outerHtml());
-        assertNull(root.parent());
-        assertSame(root, child.parent());
-        assertSame(child, descendant.parent());
-    }
-
-    @Test void rejectsAncestorReplacement() {
-        Element root = new Element("root");
-        Element child = root.appendElement("child");
-        child.appendElement("descendant");
-        String originalHtml = root.outerHtml();
-
-        assertThrows(ValidationException.class, () -> child.replaceWith(root));
-        assertEquals(originalHtml, root.outerHtml());
-        assertNull(root.parent());
-        assertSame(root, child.parent());
-    }
-
-    @Test void rejectsCyclicBatchAtomically() {
-        Element source = new Element("source");
-        Element movable = source.appendElement("movable");
-        Element ancestor = new Element("ancestor");
-        Element target = ancestor.appendElement("target");
-        String sourceHtml = source.outerHtml();
-        String ancestorHtml = ancestor.outerHtml();
-
-        assertThrows(ValidationException.class, () -> target.insertChildren(0, movable, ancestor));
-        assertEquals(sourceHtml, source.outerHtml());
-        assertEquals(ancestorHtml, ancestor.outerHtml());
-        assertSame(source, movable.parent());
-        assertNull(ancestor.parent());
-        assertSame(ancestor, target.parent());
-    }
-
-    @Test void rejectsCyclicWholeSourceMove() {
-        Element source = new Element("source");
-        Element ancestor = source.appendElement("ancestor");
-        Element target = ancestor.appendElement("target");
-        String originalHtml = source.outerHtml();
-
-        assertThrows(ValidationException.class, () -> target.insertChildren(0, source.childNodes()));
-        assertEquals(originalHtml, source.outerHtml());
-        assertNull(source.parent());
-        assertSame(source, ancestor.parent());
-        assertSame(ancestor, target.parent());
-    }
-
-    @Test void allowsPopulatedSubtreeMove() {
-        Element source = new Element("source");
-        Element subtree = source.appendElement("subtree");
-        subtree.appendElement("child").text("One");
-        Element target = new Element("target");
-
-        target.appendChild(subtree);
-        assertEquals(0, source.childNodeSize());
-        assertSame(target, subtree.parent());
-        assertSame(subtree, target.childNode(0));
-        assertEquals("One", target.text());
-    }
-
     @Test public void ownerDocument() {
         Document doc = Jsoup.parse("<p>Hello");
         Element p = doc.select("p").first();
@@ -319,19 +228,6 @@ public class NodeTest {
         assertEquals("Three One Two", div.text());
     }
 
-    @Test void beforeSelfIsNoOp() {
-        // https://github.com/jhy/jsoup/issues/2628
-        Document doc = Jsoup.parse("<ul><li id=a>A</li><li id=b>B</li><li id=c>C</li></ul>");
-        Element ul = doc.expectFirst("ul");
-        Element b = doc.expectFirst("#b");
-
-        assertSame(b, b.before(b));
-        assertSame(ul, b.parent());
-        assertEquals(3, ul.childrenSize());
-        assertSame(b, ul.child(1));
-        assertEquals("A B C", ul.text());
-    }
-
     @Test public void after() {
         Document doc = Jsoup.parse("<p>One <b>two</b> three</p>");
         Element newNode = new Element(Tag.valueOf("em"), "");
@@ -363,19 +259,6 @@ public class NodeTest {
         assertEquals("Three One Two", div.text());
     }
 
-    @Test void afterSelfIsNoOp() {
-        // https://github.com/jhy/jsoup/issues/2628
-        Document doc = Jsoup.parse("<ul><li id=a>A</li><li id=b>B</li><li id=c>C</li></ul>");
-        Element ul = doc.expectFirst("ul");
-        Element b = doc.expectFirst("#b");
-
-        assertSame(b, b.after(b));
-        assertSame(ul, b.parent());
-        assertEquals(3, ul.childrenSize());
-        assertSame(b, ul.child(1));
-        assertEquals("A B C", ul.text());
-    }
-
     @Test public void unwrap() {
         Document doc = Jsoup.parse("<div>One <span>Two <b>Three</b></span> Four</div>");
         Element span = doc.select("span").first();
@@ -393,7 +276,7 @@ public class NodeTest {
         Document doc = Jsoup.parse("<div>One <span></span> Two</div>");
         Element span = doc.select("span").first();
         Node node = span.unwrap();
-        assertEquals("<div>One Two</div>", TextUtil.stripNewlines(doc.body().html()));
+        assertEquals("<div>One  Two</div>", TextUtil.stripNewlines(doc.body().html()));
         assertNull(node);
     }
 
@@ -466,7 +349,8 @@ public class NodeTest {
         tn2.text("Text 1 updated");
         assertEquals("Text 1 ", tn1.text());
         div2.insertChildren(-1, divChildren);
-        assertEquals("<div id=\"1\">Text 1<p>One</p>Text 2<p>Two</p><p>Three</p></div><div id=\"2\">Text 1 updated<p>One</p>Text 2<p>Two</p><p>Three</p></div>", TextUtil.stripNewlines(doc.body().html()));
+        assertEquals("<div id=\"1\">Text 1 <p>One</p> Text 2 <p>Two</p><p>Three</p></div><div id=\"2\">Text 1 updated"
+            +"<p>One</p> Text 2 <p>Two</p><p>Three</p></div>", TextUtil.stripNewlines(doc.body().html()));
     }
 
     @Test public void supportsClone() {
@@ -566,54 +450,16 @@ public class NodeTest {
         assertNull(firstEl.lastElementChild());
     }
 
-    @Test void firstLastSibling() {
-        Document doc = Jsoup.parse("<div><span>One</span> Two <span>Three</span>");
-        Elements spans = doc.select("span");
-        TextNode text = (TextNode) spans.first().nextSibling();
-        assertSame(spans.get(0), text.firstSibling());
-        assertSame(spans.get(1), text.lastSibling());
-    }
-
     @Test void nodeName() {
         Element div = new Element("DIV");
         assertEquals("DIV", div.tagName());
         assertEquals("DIV", div.nodeName());
         assertEquals("div", div.normalName());
-        assertTrue(div.nameIs("div"));
+        assertTrue(div.isNode("div"));
+        assertTrue(Node.isNode(div, "div"));
 
         TextNode text = new TextNode("Some Text");
         assertEquals("#text", text.nodeName());
         assertEquals("#text", text.normalName());
-    }
-
-    @Test void elementIs() {
-        String html = "<div><p>One</p>";
-        Document doc = Jsoup.parse(html);
-
-        Element p = doc.expectFirst("p");
-        TextNode text = (TextNode) p.childNode(0);
-
-        assertTrue(text.parentElementIs("p", NamespaceHtml));
-        assertFalse(text.parentElementIs("div", NamespaceHtml));
-        assertFalse(text.parentElementIs("p", NamespaceXml));
-
-        assertTrue(p.parentElementIs("div", NamespaceHtml));
-        assertTrue(p.elementIs("p", NamespaceHtml));
-        assertTrue(p.nameIs("p"));
-        assertFalse(p.nameIs("P"));
-    }
-
-    @Test void svgElementIs() {
-        String html = "<div><svg><path>1,2,3</path></svg></div>";
-        Document doc = Jsoup.parse(html);
-
-        Element svg = doc.expectFirst("svg");
-        assertTrue(svg.nameIs("svg"));
-        assertFalse(svg.elementIs("svg", NamespaceHtml));
-        assertTrue(svg.elementIs("svg", NamespaceSvg));
-
-        TextNode data = (TextNode) svg.childNode(0).childNode(0);
-        assertTrue(data.parentElementIs("path", NamespaceSvg));
-        assertTrue(data.parentNameIs("path"));
     }
 }

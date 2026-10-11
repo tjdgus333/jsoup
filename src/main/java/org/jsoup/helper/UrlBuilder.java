@@ -2,8 +2,8 @@ package org.jsoup.helper;
 
 import org.jsoup.Connection;
 import org.jsoup.internal.StringUtil;
-import org.jspecify.annotations.Nullable;
 
+import javax.annotation.Nullable;
 import java.io.UnsupportedEncodingException;
 import java.net.IDN;
 import java.net.MalformedURLException;
@@ -45,9 +45,7 @@ final class UrlBuilder {
             appendToAscii(u.getPath(), false, normUrl);
             if (q != null) {
                 normUrl.append('?');
-                String query = StringUtil.releaseBuilder(q);
-                q = null; // don't retain the released builder
-                appendToAscii(query, true, normUrl);
+                appendToAscii(StringUtil.releaseBuilder(q), true, normUrl);
             }
             if (u.getRef() != null) {
                 normUrl.append('#');
@@ -83,31 +81,20 @@ final class UrlBuilder {
         }
     }
 
-    private static final String unsafeCharacters = "<>\"{}|\\^[]`#";
-
     private static void appendToAscii(String s, boolean spaceAsPlus, StringBuilder sb) throws UnsupportedEncodingException {
+        // minimal normalization of Unicode -> Ascii, and space normal. Existing escapes are left as-is.
         for (int i = 0; i < s.length(); i++) {
             int c = s.codePointAt(i);
             if (c == ' ') {
                 sb.append(spaceAsPlus ? '+' : "%20");
-            } else if (c == '%') { // if already a valid escape, pass; otherwise, escape
-                if (i < s.length() - 2 && isHex(s.charAt(i + 1)) && isHex(s.charAt(i + 2))) {
-                    sb.append('%').append(s.charAt(i + 1)).append(s.charAt(i + 2));
-                    i += 2; // skip the next two characters
-                } else {
-                    sb.append("%25");
-                }
-            } else if (c < 0x20 || c >= 0x7f || unsafeCharacters.indexOf(c) != -1) { // ascii control, past ascii, or otherwise unsafe
+            } else if (c > 127) { // out of ascii range
                 sb.append(URLEncoder.encode(new String(Character.toChars(c)), UTF_8.name()));
+                // ^^ is a bit heavy-handed - if perf critical, we could optimize
                 if (Character.charCount(c) == 2) i++; // advance past supplemental
             } else {
                 sb.append((char) c);
             }
         }
-    }
-
-    private static boolean isHex(char c) {
-        return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
     }
 
 

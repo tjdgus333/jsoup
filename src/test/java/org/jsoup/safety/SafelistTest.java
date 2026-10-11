@@ -62,27 +62,6 @@ public class SafelistTest {
     }
 
     @Test
-    void isSafeAttributeDoesNotModifyLiveAttribute() {
-        Attributes attributes = new Attributes().put("href", "/foo");
-        Element link = new Element(Tag.valueOf("a"), "https://example.com/", attributes);
-        Attribute href = link.attributes().attribute("href");
-        assertNotNull(href);
-
-        assertTrue(Safelist.basic().isSafeAttribute("a", link, href));
-        assertEquals("/foo", href.getValue());
-        assertEquals("/foo", link.attr("href"));
-    }
-
-    @Test
-    void enforcedAttributeMatchesInputKeyCaseInsensitively() {
-        Attribute rel = new Attribute("REL", "nofollow");
-        Attributes attributes = new Attributes().put(rel);
-        Element link = new Element(Tag.valueOf("a"), "", attributes);
-
-        assertTrue(Safelist.basic().isSafeAttribute("a", link, rel));
-    }
-
-    @Test
     void noscriptIsBlocked() {
         boolean threw = false;
         Safelist safelist = null;
@@ -94,19 +73,6 @@ public class SafelistTest {
         }
         assertTrue(threw);
         assertNull(safelist);
-    }
-
-    @Test
-    void namesUseAsciiCaseFolding() {
-        Safelist safelist = Safelist.none()
-            .addTags("P", "X-Ä")
-            .addAttributes("P", "DATA-Ä");
-
-        assertTrue(safelist.isSafeTag("p"));
-        assertTrue(safelist.isSafeTag("x-Ä"));
-        assertFalse(safelist.isSafeTag("x-ä"));
-        assertTrue(safelist.isSafeAttribute("p", null, new Attribute("data-Ä", TEST_VALUE)));
-        assertFalse(safelist.isSafeAttribute("p", null, new Attribute("data-ä", TEST_VALUE)));
     }
 
 

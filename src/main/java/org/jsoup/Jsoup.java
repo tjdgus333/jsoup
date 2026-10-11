@@ -7,15 +7,14 @@ import org.jsoup.nodes.Element;
 import org.jsoup.parser.Parser;
 import org.jsoup.safety.Cleaner;
 import org.jsoup.safety.Safelist;
-import org.jspecify.annotations.Nullable;
+
+import javax.annotation.Nullable;
+import javax.annotation.WillClose;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
-import java.nio.file.Path;
-
-import static org.jsoup.internal.SharedConstants.DummyUri;
 
 /**
  The core public access point to the jsoup functionality.
@@ -186,72 +185,6 @@ Connection con3 = session.newRequest();
         return DataUtil.load(file, charsetName, baseUri, parser);
     }
 
-    /**
-     Parse the contents of a file as HTML.
-
-     @param path          file to load HTML from. Supports gzipped files (ending in .z or .gz).
-     @param charsetName (optional) character set of file contents. Set to {@code null} to determine from {@code http-equiv} meta tag, if
-     present, or fall back to {@code UTF-8} (which is often safe to do).
-     @param baseUri     The URL where the HTML was retrieved from, to resolve relative links against.
-     @return sane HTML
-
-     @throws IOException if the file could not be found, or read, or if the charsetName is invalid.
-     @since 1.18.1
-     */
-    public static Document parse(Path path, @Nullable String charsetName, String baseUri) throws IOException {
-        return DataUtil.load(path, charsetName, baseUri);
-    }
-
-    /**
-     Parse the contents of a file as HTML. The location of the file is used as the base URI to qualify relative URLs.
-
-     @param path        file to load HTML from. Supports gzipped files (ending in .z or .gz).
-     @param charsetName (optional) character set of file contents. Set to {@code null} to determine from {@code http-equiv} meta tag, if
-     present, or fall back to {@code UTF-8} (which is often safe to do).
-     @return sane HTML
-
-     @throws IOException if the file could not be found, or read, or if the charsetName is invalid.
-     @see #parse(File, String, String) parse(file, charset, baseUri)
-     @since 1.18.1
-     */
-    public static Document parse(Path path, @Nullable String charsetName) throws IOException {
-        return DataUtil.load(path, charsetName, path.toAbsolutePath().toString());
-    }
-
-    /**
-     Parse the contents of a file as HTML. The location of the file is used as the base URI to qualify relative URLs.
-     The charset used to read the file will be determined by the byte-order-mark (BOM), or a {@code <meta charset>} tag,
-     or if neither is present, will be {@code UTF-8}.
-
-     <p>This is the equivalent of calling {@link #parse(File, String) parse(file, null)}</p>
-
-     @param path the file to load HTML from. Supports gzipped files (ending in .z or .gz).
-     @return sane HTML
-     @throws IOException if the file could not be found or read.
-     @see #parse(Path, String, String) parse(file, charset, baseUri)
-     @since 1.18.1
-     */
-    public static Document parse(Path path) throws IOException {
-        return DataUtil.load(path, null, path.toAbsolutePath().toString());
-    }
-
-    /**
-     Parse the contents of a file as HTML.
-
-     @param path          file to load HTML from. Supports gzipped files (ending in .z or .gz).
-     @param charsetName (optional) character set of file contents. Set to {@code null} to determine from {@code http-equiv} meta tag, if
-     present, or fall back to {@code UTF-8} (which is often safe to do).
-     @param baseUri     The URL where the HTML was retrieved from, to resolve relative links against.
-     @param parser alternate {@link Parser#xmlParser() parser} to use.
-     @return sane HTML
-
-     @throws IOException if the file could not be found, or read, or if the charsetName is invalid.
-     @since 1.18.1
-     */
-    public static Document parse(Path path, @Nullable String charsetName, String baseUri, Parser parser) throws IOException {
-        return DataUtil.load(path, charsetName, baseUri, parser);
-    }
-
      /**
      Read an input stream, and parse it to a Document.
 
@@ -261,9 +194,9 @@ Connection con3 = session.newRequest();
      @param baseUri     The URL where the HTML was retrieved from, to resolve relative links against.
      @return sane HTML
 
-     @throws IOException if the stream could not be read, or if the charsetName is invalid.
+     @throws IOException if the file could not be found, or read, or if the charsetName is invalid.
      */
-    public static Document parse(InputStream in, @Nullable String charsetName, String baseUri) throws IOException {
+    public static Document parse(@WillClose InputStream in, @Nullable String charsetName, String baseUri) throws IOException {
         return DataUtil.load(in, charsetName, baseUri);
     }
 
@@ -278,7 +211,7 @@ Connection con3 = session.newRequest();
      @param parser alternate {@link Parser#xmlParser() parser} to use.
      @return sane HTML
 
-     @throws IOException if the stream could not be read, or if the charsetName is invalid.
+     @throws IOException if the file could not be found, or read, or if the charsetName is invalid.
      */
     public static Document parse(InputStream in, @Nullable String charsetName, String baseUri, Parser parser) throws IOException {
         return DataUtil.load(in, charsetName, baseUri, parser);
@@ -344,10 +277,6 @@ Connection con3 = session.newRequest();
      @see Cleaner#clean(Document)
      */
     public static String clean(String bodyHtml, String baseUri, Safelist safelist) {
-        if (baseUri.isEmpty() && safelist.preserveRelativeLinks()) {
-            baseUri = DummyUri; // set a placeholder URI to allow relative links to pass abs resolution for protocol tests; won't leak to output
-        }
-
         Document dirty = parseBodyFragment(bodyHtml, baseUri);
         Cleaner cleaner = new Cleaner(safelist);
         Document clean = cleaner.clean(dirty);

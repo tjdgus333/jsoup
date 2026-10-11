@@ -46,7 +46,7 @@ public class CommentTest {
         Document doc = Jsoup.parse(html);
         String out = doc.body().html();
         assertEquals("<div>\n" +
-            " <!-- comment -->\n Text\n" +
+            " <!-- comment --> Text\n" +
             "</div>\n" +
             "<p><!-- comment --> Text</p>", out);
 

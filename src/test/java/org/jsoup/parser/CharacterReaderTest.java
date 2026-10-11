@@ -1,7 +1,6 @@
 package org.jsoup.parser;
 
 import org.jsoup.integration.ParseTest;
-import org.jsoup.internal.StringUtil;
 import org.junit.jupiter.api.Test;
 
 import java.io.BufferedReader;
@@ -17,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author Jonathan Hedley, jonathan@hedley.net
  */
 public class CharacterReaderTest {
-    public final static int maxBufferLen = CharacterReader.BufferSize;
+    public final static int maxBufferLen = CharacterReader.maxBufferLen;
 
     @Test public void consume() {
         CharacterReader r = new CharacterReader("one");
@@ -31,10 +30,8 @@ public class CharacterReaderTest {
         assertEquals('e', r.consume());
         assertTrue(r.isEmpty());
         assertEquals(CharacterReader.EOF, r.consume());
-        assertEquals(3, r.pos());
         assertTrue(r.isEmpty());
         assertEquals(CharacterReader.EOF, r.consume());
-        assertEquals(3, r.pos());
     }
 
     @Test public void unconsume() {
@@ -178,10 +175,9 @@ public class CharacterReaderTest {
         assertEquals(" qux", r.consumeToAny('&', ';'));
     }
 
-    @Test public void consumeLetterSequenceInAscii() {
-        CharacterReader r = new CharacterReader("Oneã &bar; qux");
+    @Test public void consumeLetterSequence() {
+        CharacterReader r = new CharacterReader("One &bar; qux");
         assertEquals("One", r.consumeLetterSequence());
-        assertEquals('ã', r.consume());
         assertEquals(" &", r.consumeTo("bar;"));
         assertEquals("bar", r.consumeLetterSequence());
         assertEquals("; qux", r.consumeToEnd());
@@ -227,6 +223,51 @@ public class CharacterReaderTest {
         assertFalse(r.matchesIgnoreCase("ne Two Three Four"));
         assertEquals("ne Two Three", r.consumeToEnd());
         assertFalse(r.matchesIgnoreCase("ne"));
+    }
+
+    @Test public void containsIgnoreCase() {
+        CharacterReader r = new CharacterReader("One TWO three");
+        assertTrue(r.containsIgnoreCase("two"));
+        assertTrue(r.containsIgnoreCase("three"));
+        // weird one: does not find one, because it scans for consistent case only
+        assertFalse(r.containsIgnoreCase("one"));
+    }
+
+    @Test void containsIgnoreCaseBuffer() {
+        String html = "<p><p><p></title><p></TITLE><p>" + BufferBuster("Foo Bar Qux ") + "<foo><bar></title>";
+        CharacterReader r = new CharacterReader(html);
+
+        assertTrue(r.containsIgnoreCase("</title>"));
+        assertFalse(r.containsIgnoreCase("</not>"));
+        assertFalse(r.containsIgnoreCase("</not>")); // cached, but we only test functionally here
+        assertTrue(r.containsIgnoreCase("</title>"));
+        r.consumeTo("</title>");
+        assertTrue(r.containsIgnoreCase("</title>"));
+        r.consumeTo("<p>");
+        assertTrue(r.matches("<p>"));
+
+        assertTrue(r.containsIgnoreCase("</title>"));
+        assertTrue(r.containsIgnoreCase("</title>"));
+        assertFalse(r.containsIgnoreCase("</not>"));
+        assertFalse(r.containsIgnoreCase("</not>"));
+
+        r.consumeTo("</TITLE>");
+        r.consumeTo("<p>");
+        assertTrue(r.matches("<p>"));
+        assertFalse(r.containsIgnoreCase("</title>")); // because we haven't buffered up yet, we don't know
+        r.consumeTo("<foo>");
+        assertFalse(r.matches("<foo>")); // buffer underrun
+        r.consumeTo("<foo>");
+        assertTrue(r.matches("<foo>")); // cross the buffer
+        assertTrue(r.containsIgnoreCase("</TITLE>"));
+        assertTrue(r.containsIgnoreCase("</title>"));
+    }
+
+    static String BufferBuster(String content) {
+        StringBuilder builder = new StringBuilder();
+        while (builder.length() < maxBufferLen)
+            builder.append(content);
+        return builder.toString();
     }
 
     @Test public void matchesAny() {
@@ -318,23 +359,24 @@ public class CharacterReaderTest {
 
     @Test
     public void notEmptyAtBufferSplitPoint() {
-        int len = CharacterReader.BufferSize * 12;
-        StringBuilder builder = StringUtil.borrowBuilder();
-        while (builder.length() <= len) builder.append('!');
-        CharacterReader r = new CharacterReader(builder.toString());
-        StringUtil.releaseBuilder(builder);
+        CharacterReader r = new CharacterReader(new StringReader("How about now"), 3);
+        assertEquals("How", r.consumeTo(' '));
+        assertFalse(r.isEmpty(), "Should not be empty");
 
-        // consume through
-        for (int pos = 0; pos < len; pos ++) {
-            assertEquals(pos, r.pos());
-            assertFalse(r.isEmpty());
-            assertEquals('!', r.consume());
-            assertEquals(pos + 1, r.pos());
-            assertFalse(r.isEmpty());
-        }
-        assertEquals('!', r.consume());
+        assertEquals(' ', r.consume());
+        assertFalse(r.isEmpty());
+        assertEquals(4, r.pos());
+        assertEquals('a', r.consume());
+        assertEquals(5, r.pos());
+        assertEquals('b', r.consume());
+        assertEquals('o', r.consume());
+        assertEquals('u', r.consume());
+        assertEquals('t', r.consume());
+        assertEquals(' ', r.consume());
+        assertEquals('n', r.consume());
+        assertEquals('o', r.consume());
+        assertEquals('w', r.consume());
         assertTrue(r.isEmpty());
-        assertEquals(CharacterReader.EOF, r.consume());
     }
 
     @Test public void bufferUp() {
@@ -391,14 +433,14 @@ public class CharacterReaderTest {
         assertEquals(12, noTrack.pos());
         assertEquals(1, noTrack.lineNumber());
         assertEquals(13, noTrack.columnNumber());
-        assertEquals("1:13", noTrack.posLineCol());
+        assertEquals("1:13", noTrack.cursorPos());
         // get over the buffer
         while (!noTrack.matches("[foo]"))
             noTrack.consumeTo("[foo]");
-        assertEquals(2090, noTrack.pos());
+        assertEquals(32778, noTrack.pos());
         assertEquals(1, noTrack.lineNumber());
         assertEquals(noTrack.pos()+1, noTrack.columnNumber());
-        assertEquals("1:2091", noTrack.posLineCol());
+        assertEquals("1:32779", noTrack.cursorPos());
 
         // and the line numbers: "<foo>\n<bar>\n<qux>\n"
         assertEquals(0, track.pos());
@@ -420,24 +462,24 @@ public class CharacterReaderTest {
         assertEquals(12, track.pos());
         assertEquals(3, track.lineNumber());
         assertEquals(1, track.columnNumber());
-        assertEquals("3:1", track.posLineCol());
+        assertEquals("3:1", track.cursorPos());
         assertEquals("<qux>", track.consumeTo('\n'));
-        assertEquals("3:6", track.posLineCol());
+        assertEquals("3:6", track.cursorPos());
         // get over the buffer
         while (!track.matches("[foo]"))
             track.consumeTo("[foo]");
-        assertEquals(2090, track.pos());
+        assertEquals(32778, track.pos());
         assertEquals(4, track.lineNumber());
-        assertEquals(2073, track.columnNumber());
-        assertEquals("4:2073", track.posLineCol());
+        assertEquals(32761, track.columnNumber());
+        assertEquals("4:32761", track.cursorPos());
         track.consumeTo('\n');
-        assertEquals("4:2078", track.posLineCol());
+        assertEquals("4:32766", track.cursorPos());
 
         track.consumeTo("[bar]");
         assertEquals(5, track.lineNumber());
-        assertEquals("5:1", track.posLineCol());
+        assertEquals("5:1", track.cursorPos());
         track.consumeToEnd();
-        assertEquals("5:6", track.posLineCol());
+        assertEquals("5:6", track.cursorPos());
     }
 
     @Test public void countsColumnsOverBufferWhenNoNewlines() {
@@ -448,12 +490,10 @@ public class CharacterReaderTest {
         CharacterReader reader = new CharacterReader(content);
         reader.trackNewlines(true);
 
-        assertEquals("1:1", reader.posLineCol());
-        StringBuilder seen = new StringBuilder();
+        assertEquals("1:1", reader.cursorPos());
         while (!reader.isEmpty())
-            seen.append(reader.consume());
-        assertEquals(content, seen.toString());
-        assertEquals(content.length(), reader.pos());
+            reader.consume();
+        assertEquals(131096, reader.pos());
         assertEquals(reader.pos() + 1, reader.columnNumber());
         assertEquals(1, reader.lineNumber());
     }
@@ -473,48 +513,6 @@ public class CharacterReaderTest {
         reader.consumeTo(' ');
         assertEquals(1002, reader.lineNumber());
         assertEquals(14, reader.columnNumber());
-    }
-
-    @Test public void consumeDoubleQuotedAttributeConsumesThruSingleQuote() {
-        String html = "He'llo\" >";
-        CharacterReader r = new CharacterReader(html);
-        assertEquals("He'llo", r.consumeAttributeQuoted(false));
-        assertEquals('"', r.consume());
-    }
-
-    @Test public void consumeSingleQuotedAttributeConsumesThruDoubleQuote() {
-        String html = "He\"llo' >";
-        CharacterReader r = new CharacterReader(html);
-        assertEquals("He\"llo", r.consumeAttributeQuoted(true));
-        assertEquals('\'', r.consume());
-    }
-
-    @Test public void consumeDoubleQuotedAttributeConsumesThruSingleQuoteToAmp() {
-        String html = "He'llo &copy;\" >";
-        CharacterReader r = new CharacterReader(html);
-        assertEquals("He'llo ", r.consumeAttributeQuoted(false));
-        assertEquals('&', r.consume());
-    }
-
-    @Test public void consumeSingleQuotedAttributeConsumesThruDoubleQuoteToAmp() {
-        String html = "He\"llo &copy;' >";
-        CharacterReader r = new CharacterReader(html);
-        assertEquals("He\"llo ", r.consumeAttributeQuoted(true));
-        assertEquals('&', r.consume());
-    }
-
-
-    @Test void keywordMatchingUsesAsciiCaseAcrossRefills() {
-        for (int offset : new int[]{0, CharacterReader.BufferSize - 3, CharacterReader.BufferSize + 3}) {
-            String padding = StringUtil.padding(offset, offset);
-            try (CharacterReader reader = new CharacterReader(padding + "PUBLİC PUBLIC")) {
-                for (int i = 0; i < offset; i++) reader.consume();
-                assertFalse(reader.matchesIgnoreCase("public"));
-                assertTrue(reader.matchConsumeIgnoreCase("publİc"));
-                reader.consume();
-                assertTrue(reader.matchConsumeIgnoreCase("public"));
-            }
-        }
     }
 
 }

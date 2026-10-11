@@ -5,76 +5,22 @@ import org.jsoup.Jsoup;
 import org.jsoup.MultiLocaleExtension.MultiLocaleTest;
 import org.jsoup.integration.ParseTest;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
-import javax.net.ssl.SSLContext;
 import java.io.IOException;
-import java.net.Authenticator;
 import java.net.MalformedURLException;
-import java.net.PasswordAuthentication;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import static org.jsoup.helper.HttpConnection.Response.fixHeaderEncoding;
-import static org.jsoup.helper.HttpConnection.Response.redirectMethod;
-import static org.jsoup.helper.HttpConnection.Response.sameOrigin;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class HttpConnectionTest {
     /* most actual network http connection tests are in integration */
-
-    @Test void redirectMethodsFollowHttpSemantics() {
-        // 301 and 302 historically change POST to GET, but preserve every other method.
-        for (Connection.Method method : Connection.Method.values()) {
-            Connection.Method expected = method == Connection.Method.POST ? Connection.Method.GET : method;
-            assertEquals(expected, redirectMethod(301, method));
-            assertEquals(expected, redirectMethod(302, method));
-        }
-
-        // 303 retrieves the redirect target, while HEAD remains HEAD.
-        for (Connection.Method method : Connection.Method.values()) {
-            Connection.Method expected = method == Connection.Method.HEAD ? Connection.Method.HEAD : Connection.Method.GET;
-            assertEquals(expected, redirectMethod(303, method));
-        }
-
-        // 307 and 308 explicitly preserve the request method.
-        for (Connection.Method method : Connection.Method.values()) {
-            assertEquals(method, redirectMethod(307, method));
-            assertEquals(method, redirectMethod(308, method));
-        }
-
-        assertNull(redirectMethod(201, Connection.Method.GET));
-        assertNull(redirectMethod(300, Connection.Method.GET));
-        assertNull(redirectMethod(304, Connection.Method.GET));
-    }
-
-    @Test void sameOriginUsesSchemeHostAndEffectivePort() throws MalformedURLException {
-        assertTrue(sameOrigin(
-            new URL("http://example.com/path"),
-            new URL("http://EXAMPLE.com:80/other")));
-        assertTrue(sameOrigin(
-            new URL("https://example.com/"),
-            new URL("https://example.com:443/")));
-
-        assertFalse(sameOrigin(
-            new URL("http://example.com/"),
-            new URL("https://example.com/")));
-        assertFalse(sameOrigin(
-            new URL("http://example.com/"),
-            new URL("http://www.example.com/")));
-        assertFalse(sameOrigin(
-            new URL("http://example.com/"),
-            new URL("http://example.com:8080/")));
-    }
 
     @Test public void canCreateEmptyConnection() {
         HttpConnection con = new HttpConnection();
@@ -198,24 +144,6 @@ public class HttpConnectionTest {
         assertNull(headers.get("Accept"));
     }
 
-    @Test void responseHeadersPreserveInsertOrder() throws IOException {
-        // linkedhashmap preserves the response header order
-        Connection.Response res = new HttpConnection.Response();
-        res.addHeader("5", "5");
-        res.addHeader("4", "4");
-        res.addHeader("3", "3");
-        res.addHeader("2", "2");
-        res.addHeader("1", "1");
-
-        String[] expected = {"5", "4", "3", "2", "1"};
-        int i = 0;
-        for (String key : res.headers().keySet()) {
-            assertEquals(expected[i++], key);
-        }
-
-        assertInstanceOf(LinkedHashMap.class, res.headers());
-    }
-
     @Test public void ignoresEmptySetCookies() {
         // prep http response header map
         Map<String, List<String>> headers = new HashMap<>();
@@ -223,6 +151,27 @@ public class HttpConnectionTest {
         HttpConnection.Response res = new HttpConnection.Response();
         res.processResponseHeaders(headers);
         assertEquals(0, res.cookies().size());
+    }
+
+    @Test public void ignoresEmptyCookieNameAndVals() {
+        // prep http response header map
+        Map<String, List<String>> headers = new HashMap<>();
+        List<String> cookieStrings = new ArrayList<>();
+        cookieStrings.add(null);
+        cookieStrings.add("");
+        cookieStrings.add("one");
+        cookieStrings.add("two=");
+        cookieStrings.add("three=;");
+        cookieStrings.add("four=data; Domain=.example.com; Path=/");
+
+        headers.put("Set-Cookie", cookieStrings);
+        HttpConnection.Response res = new HttpConnection.Response();
+        res.processResponseHeaders(headers);
+        assertEquals(4, res.cookies().size());
+        assertEquals("", res.cookie("one"));
+        assertEquals("", res.cookie("two"));
+        assertEquals("", res.cookie("three"));
+        assertEquals("data", res.cookie("four"));
     }
 
     @Test public void connectWithUrl() throws MalformedURLException {
@@ -292,8 +241,6 @@ public class HttpConnectionTest {
         assertEquals("file", kv.key());
         assertEquals("thumb.jpg", kv.value());
         assertTrue(kv.hasInputStream());
-        assertThrows(ValidationException.class, () ->
-            HttpConnection.KeyVal.create("file", "thumb.jpg").inputStream(null));
 
         kv = HttpConnection.KeyVal.create("one", "two");
         assertEquals("one", kv.key());
@@ -309,22 +256,14 @@ public class HttpConnectionTest {
 
     @Test public void encodeUrl() throws MalformedURLException {
         URL url1 = new URL("https://test.com/foo%20bar/%5BOne%5D?q=white+space#frag");
-        UrlBuilder builder = new UrlBuilder(url1);
-        URL url2 = builder.build();
+        URL url2 = new UrlBuilder(url1).build();
         assertEquals("https://test.com/foo%20bar/%5BOne%5D?q=white+space#frag", url2.toExternalForm());
-        assertNull(builder.q);
     }
 
     @Test public void encodeUrlSupplementary() throws MalformedURLException {
         URL url1 = new URL("https://example.com/tools/test💩.html"); // = "/tools/test\uD83D\uDCA9.html"
         URL url2 = new UrlBuilder(url1).build();
         assertEquals("https://example.com/tools/test%F0%9F%92%A9.html", url2.toExternalForm());
-    }
-
-    @Test void urlControlCharsAreEncoded() throws MalformedURLException {
-        URL input = new URL("https://example.com/a\tb\u007F?q=\u0001#f\u001Fg#h");
-        URL normalized = new UrlBuilder(input).build();
-        assertEquals("https://example.com/a%09b%7F?q=%01#f%1Fg%23h", normalized.toExternalForm());
     }
 
     @Test void encodedUrlDoesntDoubleEncode() throws MalformedURLException {
@@ -339,8 +278,8 @@ public class HttpConnectionTest {
         URL url1 = new URL("https://test.com/[foo] bar+/%5BOne%5D?q=white space#frag ment");
         URL url2 = new UrlBuilder(url1).build();
         URL url3 = new UrlBuilder(url2).build();
-        assertEquals("https://test.com/%5Bfoo%5D%20bar+/%5BOne%5D?q=white+space#frag%20ment", url2.toExternalForm());
-        assertEquals("https://test.com/%5Bfoo%5D%20bar+/%5BOne%5D?q=white+space#frag%20ment", url3.toExternalForm());
+        assertEquals("https://test.com/[foo]%20bar+/%5BOne%5D?q=white+space#frag%20ment", url2.toExternalForm());
+        assertEquals("https://test.com/[foo]%20bar+/%5BOne%5D?q=white+space#frag%20ment", url3.toExternalForm());
     }
 
     @Test void connectToEncodedUrl() {
@@ -378,14 +317,6 @@ public class HttpConnectionTest {
     @Test public void handlesHeaderEncodingOnRequest() {
         Connection.Request req = new HttpConnection.Request();
         req.addHeader("xxx", "é");
-    }
-
-    @Test void storesSslContextOnRequest() throws Exception {
-        SSLContext sslContext = SSLContext.getInstance("TLS");
-        Connection.Request req = new HttpConnection.Request();
-
-        assertSame(req, req.sslContext(sslContext));
-        assertSame(sslContext, req.sslContext());
     }
 
     @Test public void supportsInternationalDomainNames() throws MalformedURLException {
@@ -441,66 +372,5 @@ public class HttpConnectionTest {
 
         String actual = connect.request().header("Key");
         assertEquals(value, actual);
-    }
-
-    @Test void setAuth() throws MalformedURLException {
-        Connection con = Jsoup.newSession();
-
-        assertNull(con.request().auth());
-
-        RequestAuthenticator auth1 = new RequestAuthenticator() {
-            @Override public PasswordAuthentication authenticate(Context auth) {
-                return auth.credentials("foo", "bar");
-            }
-        };
-
-        RequestAuthenticator auth2 = new RequestAuthenticator() {
-            @Override public PasswordAuthentication authenticate(Context auth) {
-                return auth.credentials("qux", "baz");
-            }
-        };
-
-        con.auth(auth1);
-        assertSame(con.request().auth(), auth1);
-
-        con.auth(auth2);
-        assertSame(con.request().auth(), auth2);
-
-        con.request().auth(auth1);
-        assertSame(con.request().auth(), auth1);
-
-        PasswordAuthentication creds = auth1.authenticate(
-            new RequestAuthenticator.Context(new URL("http://example.com"), Authenticator.RequestorType.SERVER, "Realm"));
-        assertNotNull(creds);
-        assertEquals("foo", creds.getUserName());
-        assertEquals("bar", new String(creds.getPassword()));
-    }
-
-    /* Tests for fixHeaderEncoding. We are handling two cases when a server sends a header in UTF8. The JVM will decode
-    that in 8859 (per the RFC) and we'll get mojibake, and so we try to fix it. On Android, will be decoded correctly,
-    so should not be modified. */
-    static String mojibake(String input) {
-        // simulate mojibake by encoding in UTF-8 and decoding in ISO-8859-1
-        return new String(input.getBytes(StandardCharsets.UTF_8), StandardCharsets.ISO_8859_1);
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"search.php?moji=我的", "latin=café", "🍕", "ascii"})
-    void fixesHeaderEncodingIfRequired(String input) {
-        // if the input was mojibaked, we fix it; otherwise is passed
-        // https://github.com/jhy/jsoup/issues/2011
-        assertEquals(input, fixHeaderEncoding(input));
-        assertEquals(input, fixHeaderEncoding(mojibake(input)));
-    }
-
-    @Test void mimeNameEscapesQuotesAndNewlines() {
-        assertEquals("field%22name%0D%0Afile", HttpConnection.encodeMimeName("field\"name\r\nfile"));
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"text/plain\rX-Test: yes", "text/plain\nX-Test: yes"})
-    void mimeContentTypeRejectsNewlines(String contentType) {
-        assertThrows(ValidationException.class, () ->
-                HttpConnection.KeyVal.create("file", "file.txt").contentType(contentType));
     }
 }

@@ -1,18 +1,15 @@
 package org.jsoup.parser;
 
-import org.jsoup.internal.StringUtil;
 import org.jsoup.nodes.Attributes;
-
-import static org.jsoup.internal.Normalizer.asciiLowerCase;
+import javax.annotation.Nullable;
+import static org.jsoup.internal.Normalizer.lowerCase;
 
 /**
  * Controls parser case settings, to optionally preserve tag and/or attribute name case.
- * Case conversion uses ASCII rules.
- * Programmatic name normalization also trims surrounding ASCII whitespace.
  */
 public class ParseSettings {
     /**
-     * HTML defaults: lower-case tag and attribute names.
+     * HTML default settings: both tag and attribute names are lower-cased during parsing.
      */
     public static final ParseSettings htmlDefault;
     /**
@@ -57,28 +54,34 @@ public class ParseSettings {
     }
 
     /**
-     * Normalizes a tag name according to these settings.
+     * Normalizes a tag name according to the case preservation setting.
      */
     public String normalizeTag(String name) {
-        name = StringUtil.trimAsciiWhitespace(name);
+        name = name.trim();
         if (!preserveTagCase)
-            name = asciiLowerCase(name);
+            name = lowerCase(name);
         return name;
     }
 
     /**
-     * Normalizes an attribute name according to these settings.
+     * Normalizes an attribute according to the case preservation setting.
      */
     public String normalizeAttribute(String name) {
-        name = StringUtil.trimAsciiWhitespace(name);
+        name = name.trim();
         if (!preserveAttributeCase)
-            name = asciiLowerCase(name);
+            name = lowerCase(name);
         return name;
     }
 
-    void normalizeAttributes(Attributes attributes) {
-        if (!preserveAttributeCase) {
+    @Nullable Attributes normalizeAttributes(@Nullable Attributes attributes) {
+        if (attributes != null && !preserveAttributeCase) {
             attributes.normalize();
         }
+        return attributes;
+    }
+
+    /** Returns the normal name that a Tag will have (trimmed and lower-cased) */
+    static String normalName(String name) {
+        return lowerCase(name.trim());
     }
 }

@@ -3,8 +3,6 @@ package org.jsoup.internal;
 import org.jsoup.Jsoup;
 import org.junit.jupiter.api.Test;
 
-import java.net.MalformedURLException;
-import java.net.URL;
 import java.util.Arrays;
 import java.util.Collections;
 
@@ -19,12 +17,6 @@ public class StringUtilTest {
         assertEquals("", StringUtil.join(Collections.singletonList(""), " "));
         assertEquals("one", StringUtil.join(Collections.singletonList("one"), " "));
         assertEquals("one two three", StringUtil.join(Arrays.asList("one", "two", "three"), " "));
-    }
-
-    @Test void concatCharacterAndString() {
-        // joins the values without exposing the pooled builder lifecycle
-        assertEquals("_key", StringUtil.concat('_', "key"));
-        assertEquals("_", StringUtil.concat('_', ""));
     }
 
     @Test public void padding() {
@@ -164,36 +156,6 @@ public class StringUtilTest {
         assertEquals("https://example.com/foo bar/", resolve("HTTPS://example.com/example/", "../foo bar/"));
     }
 
-    @Test void rejectsHostlessHttpUrls() throws MalformedURLException {
-        URL httpBase = new URL("http://example.com/a/b");
-        URL httpsBase = new URL("https://example.com/a/b");
-
-        // http:/foo resolves from the origin root, not relative to /a/.
-        assertEquals("http://example.com/foo", resolve(httpBase, "http:/foo").toExternalForm());
-        assertEquals("https://example.com/foo/bar", resolve(httpsBase, "https:/foo/bar").toExternalForm());
-        assertThrows(MalformedURLException.class, () -> resolve(httpBase, "https:/foo/bar"));
-
-        assertEquals("", resolve("http://example.com/a/b", "https:/foo/bar"));
-        assertEquals("", resolve("", "https:/foo/bar"));
-        assertEquals("", resolve("", "https://"));
-        assertEquals("", resolve("", "https://?query"));
-
-        assertEquals("tel:867-5309", resolve("", "tel:867-5309"));
-        assertEquals("file:/tmp/example", resolve("", "file:/tmp/example"));
-    }
-
-    @Test void identifiesHttpSchemes() {
-        assertTrue(StringUtil.isHttpScheme("http"));
-        assertTrue(StringUtil.isHttpScheme("HTTPS"));
-        assertFalse(StringUtil.isHttpScheme("http:"));
-        assertFalse(StringUtil.isHttpScheme("ftp"));
-
-        assertTrue(StringUtil.hasHttpScheme("http://example.com"));
-        assertTrue(StringUtil.hasHttpScheme("HTTPS:/foo"));
-        assertFalse(StringUtil.hasHttpScheme("httpx://example.com"));
-        assertFalse(StringUtil.hasHttpScheme("/relative/path"));
-    }
-
     @Test
     void isAscii() {
         assertTrue(StringUtil.isAscii(""));
@@ -202,72 +164,5 @@ public class StringUtilTest {
         assertFalse(StringUtil.isAscii("🧔"));
         assertFalse(StringUtil.isAscii("测试"));
         assertFalse(StringUtil.isAscii("测试.com"));
-    }
-
-    @Test void isAsciiLetter() {
-        assertTrue(StringUtil.isAsciiLetter('a'));
-        assertTrue(StringUtil.isAsciiLetter('n'));
-        assertTrue(StringUtil.isAsciiLetter('z'));
-        assertTrue(StringUtil.isAsciiLetter('A'));
-        assertTrue(StringUtil.isAsciiLetter('N'));
-        assertTrue(StringUtil.isAsciiLetter('Z'));
-
-        assertFalse(StringUtil.isAsciiLetter(' '));
-        assertFalse(StringUtil.isAsciiLetter('-'));
-        assertFalse(StringUtil.isAsciiLetter('0'));
-        assertFalse(StringUtil.isAsciiLetter('ß'));
-        assertFalse(StringUtil.isAsciiLetter('Ě'));
-    }
-
-    @Test void isDigit() {
-        assertTrue(StringUtil.isDigit('0'));
-        assertTrue(StringUtil.isDigit('1'));
-        assertTrue(StringUtil.isDigit('2'));
-        assertTrue(StringUtil.isDigit('3'));
-        assertTrue(StringUtil.isDigit('4'));
-        assertTrue(StringUtil.isDigit('5'));
-        assertTrue(StringUtil.isDigit('6'));
-        assertTrue(StringUtil.isDigit('7'));
-        assertTrue(StringUtil.isDigit('8'));
-        assertTrue(StringUtil.isDigit('9'));
-
-        assertFalse(StringUtil.isDigit('a'));
-        assertFalse(StringUtil.isDigit('A'));
-        assertFalse(StringUtil.isDigit('ä'));
-        assertFalse(StringUtil.isDigit('Ä'));
-        assertFalse(StringUtil.isDigit('١'));
-        assertFalse(StringUtil.isDigit('୳'));
-    }
-
-    @Test void isHexDigit() {
-        assertTrue(StringUtil.isHexDigit('0'));
-        assertTrue(StringUtil.isHexDigit('1'));
-        assertTrue(StringUtil.isHexDigit('2'));
-        assertTrue(StringUtil.isHexDigit('3'));
-        assertTrue(StringUtil.isHexDigit('4'));
-        assertTrue(StringUtil.isHexDigit('5'));
-        assertTrue(StringUtil.isHexDigit('6'));
-        assertTrue(StringUtil.isHexDigit('7'));
-        assertTrue(StringUtil.isHexDigit('8'));
-        assertTrue(StringUtil.isHexDigit('9'));
-        assertTrue(StringUtil.isHexDigit('a'));
-        assertTrue(StringUtil.isHexDigit('b'));
-        assertTrue(StringUtil.isHexDigit('c'));
-        assertTrue(StringUtil.isHexDigit('d'));
-        assertTrue(StringUtil.isHexDigit('e'));
-        assertTrue(StringUtil.isHexDigit('f'));
-        assertTrue(StringUtil.isHexDigit('A'));
-        assertTrue(StringUtil.isHexDigit('B'));
-        assertTrue(StringUtil.isHexDigit('C'));
-        assertTrue(StringUtil.isHexDigit('D'));
-        assertTrue(StringUtil.isHexDigit('E'));
-        assertTrue(StringUtil.isHexDigit('F'));
-
-        assertFalse(StringUtil.isHexDigit('g'));
-        assertFalse(StringUtil.isHexDigit('G'));
-        assertFalse(StringUtil.isHexDigit('ä'));
-        assertFalse(StringUtil.isHexDigit('Ä'));
-        assertFalse(StringUtil.isHexDigit('١'));
-        assertFalse(StringUtil.isHexDigit('୳'));
     }
 }

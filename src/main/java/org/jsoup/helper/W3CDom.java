@@ -1,27 +1,24 @@
 package org.jsoup.helper;
 
-import org.jsoup.internal.NamespaceBindings;
 import org.jsoup.internal.StringUtil;
 import org.jsoup.nodes.Attribute;
 import org.jsoup.nodes.Attributes;
-import org.jsoup.nodes.CDataNode;
-import org.jsoup.nodes.Comment;
-import org.jsoup.nodes.DataNode;
-import org.jsoup.nodes.ProcessingInstruction;
-import org.jsoup.nodes.TextNode;
-import org.jsoup.nodes.XmlDeclaration;
+import org.jsoup.parser.HtmlTreeBuilder;
 import org.jsoup.parser.Parser;
+import org.jsoup.select.NodeTraversor;
 import org.jsoup.select.NodeVisitor;
 import org.jsoup.select.Selector;
+import org.w3c.dom.Comment;
 import org.w3c.dom.DOMException;
+import org.w3c.dom.DOMImplementation;
 import org.w3c.dom.Document;
 import org.w3c.dom.DocumentType;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-import org.jspecify.annotations.Nullable;
+import org.w3c.dom.Text;
 
-import javax.xml.XMLConstants;
+import javax.annotation.Nullable;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
@@ -42,8 +39,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Stack;
 
 import static javax.xml.transform.OutputKeys.METHOD;
 import static org.jsoup.nodes.Document.OutputSettings.Syntax;
@@ -118,6 +114,7 @@ public class W3CDom {
      * @see OutputKeys#ENCODING
      * @see OutputKeys#OMIT_XML_DECLARATION
      * @see OutputKeys#STANDALONE
+     * @see OutputKeys#STANDALONE
      * @see OutputKeys#DOCTYPE_PUBLIC
      * @see OutputKeys#CDATA_SECTION_ELEMENTS
      * @see OutputKeys#INDENT
@@ -139,7 +136,7 @@ public class W3CDom {
                     transformer.setOutputProperty(OutputKeys.DOCTYPE_PUBLIC, doctype.getPublicId());
                 if (!StringUtil.isBlank(doctype.getSystemId()))
                     transformer.setOutputProperty(OutputKeys.DOCTYPE_SYSTEM, doctype.getSystemId());
-                    // handle <!doctype html> for legacy dom.
+                    // handle <!doctype html> for legacy dom. TODO: nicer if <!doctype html>
                 else if (doctype.getName().equalsIgnoreCase("html")
                     && StringUtil.isBlank(doctype.getPublicId())
                     && StringUtil.isBlank(doctype.getSystemId()))
@@ -205,8 +202,14 @@ public class W3CDom {
         DocumentBuilder builder;
         try {
             builder = factory.newDocumentBuilder();
+            DOMImplementation impl = builder.getDOMImplementation();
             Document out = builder.newDocument();
             org.jsoup.nodes.Document inDoc = in.ownerDocument();
+            org.jsoup.nodes.DocumentType doctype = inDoc != null ? inDoc.documentType() : null;
+            if (doctype != null) {
+                org.w3c.dom.DocumentType documentType = impl.createDocumentType(doctype.name(), doctype.publicId(), doctype.systemId());
+                out.appendChild(documentType);
+            }
             out.setXmlStandalone(true);
             // if in is Document, use the root element, not the wrapping document, as the context:
             org.jsoup.nodes.Element context = (in instanceof org.jsoup.nodes.Document) ? in.firstElementChild() : in;
@@ -249,10 +252,8 @@ public class W3CDom {
             }
             builder.syntax = inDoc.outputSettings().syntax();
         }
-        if (in instanceof org.jsoup.nodes.Document)
-            builder.traverseDocument((org.jsoup.nodes.Document) in);
-        else
-            builder.traverse(in);
+        org.jsoup.nodes.Element rootEl = in instanceof org.jsoup.nodes.Document ? in.firstElementChild() : in; // skip the #root node if a Document
+        NodeTraversor.traverse(builder, rootEl);
     }
 
     /**
@@ -325,8 +326,7 @@ public class W3CDom {
     }
 
     /**
-     * Serialize a W3C document that was created by {@link #fromJsoup(org.jsoup.nodes.Element)} to a String.
-     * The output format will be XML or HTML depending on the content of the doc.
+     * Serialize a W3C document to a String. The output format will be XML or HTML depending on the content of the doc.
      *
      * @param doc Document
      * @return Document as string
@@ -340,134 +340,68 @@ public class W3CDom {
      * Implements the conversion by walking the input.
      */
     protected static class W3CBuilder implements NodeVisitor {
+        // TODO: move the namespace handling stuff into XmlTreeBuilder / HtmlTreeBuilder, now that Tags have namespaces
+        private static final String xmlnsKey = "xmlns";
+        private static final String xmlnsPrefix = "xmlns:";
+
         private final Document doc;
-        // source bindings include omitted ancestors; output bindings track declarations emitted to the W3C tree
-        private final NamespaceBindings sourceNamespaces = new NamespaceBindings();
-        private final NamespaceBindings outputNamespaces = new NamespaceBindings();
         private boolean namespaceAware = true;
+        private final Stack<HashMap<String, String>> namespacesStack = new Stack<>(); // stack of namespaces, prefix => urn
         private Node dest;
         private Syntax syntax = Syntax.xml; // the syntax (to coerce attributes to). From the input doc if available.
-        /*@Nullable*/ private final org.jsoup.nodes.Element contextElement; // todo - unsure why this can't be marked nullable?
+        @Nullable private final org.jsoup.nodes.Element contextElement;
 
         public W3CBuilder(Document doc) {
             this.doc = doc;
+            namespacesStack.push(new HashMap<>());
             dest = doc;
-            sourceNamespaces.put("xml", Parser.NamespaceXml);
-            outputNamespaces.put("xml", Parser.NamespaceXml);
             contextElement = (org.jsoup.nodes.Element) doc.getUserData(ContextProperty); // Track the context jsoup Element, so we can save the corresponding w3c element
-        }
-
-        // Traverse only nodes supported as W3C document children, and keep the first element as the root.
-        private void traverseDocument(org.jsoup.nodes.Document source) {
-            org.jsoup.nodes.Element root = source.firstElementChild();
-            for (org.jsoup.nodes.Node child : source.childNodes()) {
-                if (child == root || child instanceof org.jsoup.nodes.DocumentType ||
-                    child instanceof org.jsoup.nodes.Comment || child instanceof ProcessingInstruction ||
-                    child instanceof org.jsoup.nodes.XmlDeclaration)
-                    traverse(child);
+            final org.jsoup.nodes.Document inDoc = contextElement.ownerDocument();
+            if (namespaceAware && inDoc != null && inDoc.parser().getTreeBuilder() instanceof HtmlTreeBuilder) {
+              // as per the WHATWG HTML5 spec § 2.1.3, elements are in the HTML namespace by default
+              namespacesStack.peek().put("", Parser.NamespaceHtml);
             }
-        }
+          }
 
-        @Override
         public void head(org.jsoup.nodes.Node source, int depth) {
-            if (source instanceof org.jsoup.nodes.Element)
-                appendElement((org.jsoup.nodes.Element) source, depth);
-            else if (source instanceof org.jsoup.nodes.DocumentType)
-                appendDocumentType((org.jsoup.nodes.DocumentType) source);
-            else if (source instanceof CDataNode)
-                appendCdata((CDataNode) source);
-            else if (source instanceof TextNode)
-                append(doc.createTextNode(((TextNode) source).getWholeText()), source);
-            else if (source instanceof Comment)
-                append(doc.createComment(((Comment) source).getData()), source);
-            else if (source instanceof DataNode)
-                append(doc.createTextNode(((DataNode) source).getWholeData()), source);
-            else if (source instanceof ProcessingInstruction)
-                appendProcessingInstruction((ProcessingInstruction) source);
-            else if (source instanceof XmlDeclaration)
-                appendProcessingInstruction((XmlDeclaration) source);
+            namespacesStack.push(new HashMap<>(namespacesStack.peek())); // inherit from above on the stack
+            if (source instanceof org.jsoup.nodes.Element) {
+                org.jsoup.nodes.Element sourceEl = (org.jsoup.nodes.Element) source;
 
-        }
+                String prefix = updateNamespaces(sourceEl);
+                String namespace = namespaceAware ? namespacesStack.peek().get(prefix) : null;
+                String tagName = sourceEl.tagName();
 
-        /** Converts and appends an element, descending into its output node when representable. */
-        private void appendElement(org.jsoup.nodes.Element source, int depth) {
-            if (depth == 0)
-                seedSourceNamespaces(source);
-            sourceNamespaces.pushScope();
-            outputNamespaces.pushScope();
-            sourceNamespaces.applyDeclarations(source.attributes());
-            String namespace = namespaceAware ? w3cNamespace(source) : null;
-            String tagName = w3cSafeName(source.tagName(), Syntax.xml);
-            Element el;
-            try {
-                // use an empty namespace if none is present but the tag name has a prefix
-                String imputedNamespace = namespace == null && tagName.contains(":") ? "" : namespace;
-                el = doc.createElementNS(imputedNamespace, tagName);
-            } catch (DOMException ignored) {
-                // If the Normalize didn't get it XML / W3C safe, inserts as plain text
-                append(doc.createTextNode("<" + tagName + ">"), source);
-                return;
-            }
-            copyAttributes(source, el);
-            append(el, source);
-            if (source == contextElement)
-                doc.setUserData(ContextNodeProperty, el, null);
-            dest = el; // descend
-        }
-
-        // Keep the doctype in document order; invalid doctypes cannot be represented.
-        private void appendDocumentType(org.jsoup.nodes.DocumentType source) {
-            try {
-                DocumentType type = doc.getImplementation().createDocumentType(source.name(), source.publicId(), source.systemId());
-                append(type, source);
-            } catch (DOMException ignored) {
-                // invalid / empty doctype dropped
-            }
-        }
-
-        // Preserve CDATA where possible; programmatic content may be invalid for a W3C CDATA node.
-        private void appendCdata(org.jsoup.nodes.CDataNode source) {
-            try {
-                append(doc.createCDATASection(source.getWholeText()), source);
-            } catch (DOMException ignored) {
-                append(doc.createTextNode(source.getWholeText()), source);
-            }
-        }
-
-        /** Appends a W3C processing instruction if its target and data are valid. */
-        private void appendProcessingInstruction(ProcessingInstruction source) {
-            try {
-                append(doc.createProcessingInstruction(source.target(), source.data()), source);
-            } catch (DOMException ignored) {
-                // The W3C DOM rejects invalid targets or data.
-            }
-        }
-
-        // XmlDeclaration also represents <!name ...> nodes; XML declarations are reserved by the W3C DOM.
-        private void appendProcessingInstruction(org.jsoup.nodes.XmlDeclaration source) {
-            if (!source.outerHtml().startsWith("<?") || source.name().equalsIgnoreCase("xml")) return;
-            try {
-                append(doc.createProcessingInstruction(source.name(), source.getWholeDeclaration()), source);
-            } catch (DOMException ignored) {
-                // invalid programmatic processing instruction dropped
-            }
-        }
-
-        private static @Nullable String w3cNamespace(org.jsoup.nodes.Element sourceEl) {
-            // In W3C DOM, plain XML elements have no namespace; XML namespace is reserved for the {@code xml} prefix
-            String namespace = sourceEl.tag().namespace();
-            if (Parser.NamespaceXml.equals(namespace) && sourceEl.tag().prefix().isEmpty())
-                return null;
-            return namespace;
-        }
-
-        /** Applies declarations inherited from ancestors outside a subtree conversion. */
-        private void seedSourceNamespaces(org.jsoup.nodes.Element sourceEl) {
-            org.jsoup.select.Elements parents = sourceEl.parents();
-            for (int i = parents.size() - 1; i >= 0; i--) {
-                org.jsoup.nodes.Element parent = parents.get(i);
-                if (parent.attributesSize() > 0)
-                    sourceNamespaces.applyDeclarations(parent.attributes());
+                /* Tag names in XML are quite permissive, but less permissive than HTML. Rather than reimplement the validation,
+                we just try to use it as-is. If it fails, insert as a text node instead. We don't try to normalize the
+                tagname to something safe, because that isn't going to be meaningful downstream. This seems(?) to be
+                how browsers handle the situation, also. https://github.com/jhy/jsoup/issues/1093 */
+                try {
+                    // use an empty namespace if none is present but the tag name has a prefix
+                    String imputedNamespace = namespace == null && tagName.contains(":") ? "" : namespace;
+                    Element el = doc.createElementNS(imputedNamespace, tagName);
+                    copyAttributes(sourceEl, el);
+                    append(el, sourceEl);
+                    if (sourceEl == contextElement)
+                        doc.setUserData(ContextNodeProperty, el, null);
+                    dest = el; // descend
+                } catch (DOMException e) {
+                    append(doc.createTextNode("<" + tagName + ">"), sourceEl);
+                }
+            } else if (source instanceof org.jsoup.nodes.TextNode) {
+                org.jsoup.nodes.TextNode sourceText = (org.jsoup.nodes.TextNode) source;
+                Text text = doc.createTextNode(sourceText.getWholeText());
+                append(text, sourceText);
+            } else if (source instanceof org.jsoup.nodes.Comment) {
+                org.jsoup.nodes.Comment sourceComment = (org.jsoup.nodes.Comment) source;
+                Comment comment = doc.createComment(sourceComment.getData());
+                append(comment, sourceComment);
+            } else if (source instanceof org.jsoup.nodes.DataNode) {
+                org.jsoup.nodes.DataNode sourceData = (org.jsoup.nodes.DataNode) source;
+                Text node = doc.createTextNode(sourceData.getWholeData());
+                append(node, sourceData);
+            } else {
+                // unhandled. note that doctype is not handled here - rather it is used in the initial doc creation
             }
         }
 
@@ -476,134 +410,46 @@ public class W3CDom {
             dest.appendChild(append);
         }
 
-        @Override
         public void tail(org.jsoup.nodes.Node source, int depth) {
-            // head may emit an unrepresentable element as text without descending, so only ascend from its matching output element
-            if (source instanceof org.jsoup.nodes.Element && dest.getUserData(SourceProperty) == source &&
-                dest.getParentNode() != null) {
+            if (source instanceof org.jsoup.nodes.Element && dest.getParentNode() instanceof Element) {
                 dest = dest.getParentNode(); // undescend
             }
-            if (source instanceof org.jsoup.nodes.Element) {
-                sourceNamespaces.popScope();
-                outputNamespaces.popScope();
+            namespacesStack.pop();
+        }
+
+        private void copyAttributes(org.jsoup.nodes.Node source, Element el) {
+            for (Attribute attribute : source.attributes()) {
+                String key = Attribute.getValidKey(attribute.getKey(), syntax);
+                if (key != null) { // null if couldn't be coerced to validity
+                    el.setAttribute(key, attribute.getValue());
+                }
             }
         }
 
-        /** Copies namespace declarations first so source attribute order does not affect binding resolution. */
-        private void copyAttributes(org.jsoup.nodes.Element jEl, Element wEl) {
-            Attributes attributes = jEl.attributes();
-            for (Attribute attribute : attributes) {
-                if (NamespaceBindings.isDeclaration(attribute.getKey()))
-                    copyAttribute(wEl, attribute);
-            }
-            for (Attribute attribute : attributes) {
-                if (!NamespaceBindings.isDeclaration(attribute.getKey()))
-                    copyAttribute(wEl, attribute);
-            }
-        }
-
-        /** Copies an attribute using the closest W3C representation. */
-        private void copyAttribute(Element wEl, Attribute attribute) {
-            // preserve DOM-compatible HTML names; otherwise normalize as XML, and skip if still unrepresentable
-            if (!trySetAttribute(wEl, attribute, syntax) && syntax != Syntax.xml)
-                trySetAttribute(wEl, attribute, Syntax.xml);
-        }
-
-        /** Tries to copy an attribute, allowing the DOM to validate its name and namespace. */
-        private boolean trySetAttribute(Element wEl, Attribute attribute, Syntax syntax) {
-            try {
-                setAttribute(wEl, attribute, syntax);
-                return true;
-            } catch (DOMException ignored) {
-                return false;
-            }
-        }
-
-        /** Copies an attribute with its resolved namespace and W3C-safe name. */
-        private void setAttribute(Element wEl, Attribute attribute, Syntax syntax) throws DOMException {
-            String key = w3cSafeName(attribute.getKey(), syntax);
-
-            @Nullable String declarationPrefix = NamespaceBindings.declarationPrefix(key);
-            if (declarationPrefix != null) {
-                setNamespaceDeclaration(wEl, key, attribute.getValue());
-                outputNamespaces.put(declarationPrefix, attribute.getValue());
-                return;
+        /**
+         * Finds any namespaces defined in this element. Returns any tag prefix.
+         */
+        private String updateNamespaces(org.jsoup.nodes.Element el) {
+            // scan the element for namespace declarations
+            // like: xmlns="blah" or xmlns:prefix="blah"
+            Attributes attributes = el.attributes();
+            for (Attribute attr : attributes) {
+                String key = attr.getKey();
+                String prefix;
+                if (key.equals(xmlnsKey)) {
+                    prefix = "";
+                } else if (key.startsWith(xmlnsPrefix)) {
+                    prefix = key.substring(xmlnsPrefix.length());
+                } else {
+                    continue;
+                }
+                namespacesStack.peek().put(prefix, attr.getValue());
             }
 
-            int pos = key.indexOf(':');
-            if (pos == -1) { // default namespaces do not apply to unprefixed attributes
-                wEl.setAttribute(key, attribute.getValue());
-                return;
-            }
-
-            String prefix = key.substring(0, pos);
-            String sourcePrefix = attribute.prefix();
-            @Nullable String namespace;
-            if (namespaceAware) {
-                String attributeNamespace = attribute.namespace();
-                namespace = !attributeNamespace.isEmpty() ? attributeNamespace : sourceNamespaces.get(sourcePrefix);
-            } else {
-                namespace = sourceNamespaces.get(sourcePrefix);
-            }
-            if (namespace == null || namespace.isEmpty())
-                namespace = undefinedNs;
-
-            if (namespaceAware)
-                wEl.setAttributeNS(namespace, key, attribute.getValue());
-            else
-                wEl.setAttribute(key, attribute.getValue());
-            ensureOutputBinding(wEl, prefix, namespace);
+            // get the element prefix if any
+            int pos = el.tagName().indexOf(':');
+            return pos > 0 ? el.tagName().substring(0, pos) : "";
         }
 
-        /** Normalizes a name to a W3C-compatible QName, converting {@code 1:a:b} to {@code _1:a_b}. */
-        private String w3cSafeName(String name, Syntax syntax) {
-            String normalized = Attribute.getValidKey(name, syntax);
-            if (normalized.indexOf(':') == -1) return normalized;
-
-            Matcher parts = QNameParts.matcher(normalized);
-            if (!parts.matches()) return w3cSafeNcName(normalized.replace(':', '_'));
-            return w3cSafeNcName(parts.group(1)) + ':' + w3cSafeNcName(parts.group(2));
-        }
-
-        /** Normalizes one QName component while preserving valid XML name characters. */
-        private String w3cSafeNcName(String name) {
-            if (isValidNcName(name)) return name;
-            String safeStart = StringUtil.concat('_', name);
-            if (isValidNcName(safeStart)) return safeStart;
-
-            String colonSafe = name.replace(':', '_');
-            return Attribute.getValidKey(colonSafe, Syntax.xml);
-        }
-
-        /** Tests a component against the XML NCName rules used by the output DOM. */
-        private boolean isValidNcName(String name) {
-            try {
-                // validate as a local name so reserved words such as xmlns are treated as ordinary NCName text
-                doc.createAttributeNS(undefinedNs, "p:" + name);
-                return true;
-            } catch (DOMException ignored) {
-                return false;
-            }
-        }
-
-        /** Declares a prefix when its output binding is not active. */
-        private void ensureOutputBinding(Element wEl, String prefix, String namespace) {
-            if (!namespace.equals(outputNamespaces.get(prefix))) {
-                setNamespaceDeclaration(wEl, "xmlns:" + prefix, namespace);
-                outputNamespaces.put(prefix, namespace);
-            }
-        }
-
-        /** Writes a namespace declaration with namespace awareness when enabled. */
-        private void setNamespaceDeclaration(Element wEl, String key, String namespace) {
-            if (namespaceAware)
-                wEl.setAttributeNS(XMLConstants.XMLNS_ATTRIBUTE_NS_URI, key, namespace);
-            else
-                wEl.setAttribute(key, namespace);
-        }
-
-        private static final Pattern QNameParts = Pattern.compile("^([^:]+):(.+)$");
-        private static final String undefinedNs = "undefined";
     }
-
 }

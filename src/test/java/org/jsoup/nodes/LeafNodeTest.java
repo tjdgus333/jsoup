@@ -13,10 +13,8 @@ public class LeafNodeTest {
     public void doesNotGetAttributesTooEasily() {
         // test to make sure we're not setting attributes on all nodes right away
         String body = "<p>One <!-- Two --> Three<![CDATA[Four]]></p>";
-        Document doc = Jsoup.parse(body, "https://example.com/");
+        Document doc = Jsoup.parse(body);
         assertTrue(hasAnyAttributes(doc)); // should have one - the base uri on the doc
-
-        assertFalse(hasAnyAttributes(Jsoup.parse("<div>None</div>"))); // no base uri
 
         Element html = doc.child(0);
         assertFalse(hasAnyAttributes(html));

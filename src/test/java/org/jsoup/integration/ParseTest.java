@@ -15,8 +15,6 @@ import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.zip.GZIPInputStream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -135,15 +133,6 @@ public class ParseTest {
         }
     }
 
-    public static Path getPath(String resourceName) {
-        try {
-            URL resource = ParseTest.class.getResource(resourceName);
-            return resource != null ? Paths.get(resource.toURI()) : Paths.get("/404");
-        } catch (URISyntaxException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
     public static InputStream inputStreamFrom(String s) {
         return new ByteArrayInputStream(s.getBytes(StandardCharsets.UTF_8));
     }
@@ -153,8 +142,7 @@ public class ParseTest {
         if (file.getName().endsWith(".gz")) {
             InputStream stream = new GZIPInputStream(new FileInputStream(file));
             ByteBuffer byteBuffer = DataUtil.readToByteBuffer(stream, 0);
-            bytes = new byte[byteBuffer.limit()];
-            System.arraycopy(byteBuffer.array(), 0, bytes, 0, byteBuffer.limit());
+            bytes = byteBuffer.array();
         } else {
             bytes = Files.readAllBytes(file.toPath());
         }

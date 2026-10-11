@@ -8,25 +8,23 @@ import org.jsoup.nodes.Element;
 import org.jsoup.nodes.FormElement;
 import org.jsoup.nodes.Node;
 import org.jsoup.nodes.TextNode;
-import org.jspecify.annotations.Nullable;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.function.BiConsumer;
-import java.util.function.UnaryOperator;
 
 /**
  A list of {@link Element}s, with methods that act on every element in the list.
- <p>To get an {@code Elements} object, use the {@link Element#select(String)} method.</p>
- <p>Methods that {@link #set(int, Element) set}, {@link #remove(int) remove}, or {@link #replaceAll(UnaryOperator)
- replace} Elements in the list will also act on the underlying {@link org.jsoup.nodes.Document DOM}.</p>
+ <p>
+ To get an {@code Elements} object, use the {@link Element#select(String)} method.
+ </p>
 
  @author Jonathan Hedley, jonathan@hedley.net */
-public class Elements extends Nodes<Element> {
+public class Elements extends ArrayList<Element> {
     public Elements() {
     }
 
@@ -37,11 +35,11 @@ public class Elements extends Nodes<Element> {
     public Elements(Collection<Element> elements) {
         super(elements);
     }
-
+    
     public Elements(List<Element> elements) {
         super(elements);
     }
-
+    
     public Elements(Element... elements) {
     	super(Arrays.asList(elements));
     }
@@ -51,33 +49,20 @@ public class Elements extends Nodes<Element> {
      * @return a deep copy
      */
     @Override
-    public Elements clone() {
+	public Elements clone() {
         Elements clone = new Elements(size());
-        for (Element e : this)
-            clone.add(e.clone());
-        return clone;
-    }
 
-    /**
-     Convenience method to get the Elements as a plain ArrayList. This allows modification to the list of elements
-     without modifying the source Document. I.e. whereas calling {@code elements.remove(0)} will remove the element from
-     both the Elements and the DOM, {@code elements.asList().remove(0)} will remove the element from the list only.
-     <p>Each Element is still the same DOM connected Element.</p>
+        for(Element e : this)
+    		clone.add(e.clone());
+    	
+    	return clone;
+	}
 
-     @return a new ArrayList containing the elements in this list
-     @since 1.19.2
-     @see #Elements(List)
-     */
-    @Override
-    public ArrayList<Element> asList() {
-        return new ArrayList<>(this);
-    }
-
-    // attribute methods
+	// attribute methods
     /**
      Get an attribute value from the first matched element that has the attribute.
      @param attributeKey The attribute key.
-     @return The attribute value from the first matched element that has the attribute. If no elements were matched (isEmpty() == true),
+     @return The attribute value from the first matched element that has the attribute.. If no elements were matched (isEmpty() == true),
      or if the no elements have the attribute, returns empty string.
      @see #hasAttr(String)
      */
@@ -226,9 +211,13 @@ public class Elements extends Nodes<Element> {
      * @see #eachText()
      */
     public String text() {
-        return stream()
-            .map(Element::text)
-            .collect(StringUtil.joining(" "));
+        StringBuilder sb = StringUtil.borrowBuilder();
+        for (Element element : this) {
+            if (sb.length() != 0)
+                sb.append(" ");
+            sb.append(element.text());
+        }
+        return StringUtil.releaseBuilder(sb);
     }
 
     /**
@@ -268,9 +257,40 @@ public class Elements extends Nodes<Element> {
      * @see #outerHtml()
      */
     public String html() {
-        return stream()
-            .map(Element::html)
-            .collect(StringUtil.joining("\n"));
+        StringBuilder sb = StringUtil.borrowBuilder();
+        for (Element element : this) {
+            if (sb.length() != 0)
+                sb.append("\n");
+            sb.append(element.html());
+        }
+        return StringUtil.releaseBuilder(sb);
+    }
+    
+    /**
+     * Get the combined outer HTML of all matched elements.
+     * @return string of all element's outer HTML.
+     * @see #text()
+     * @see #html()
+     */
+    public String outerHtml() {
+        StringBuilder sb = StringUtil.borrowBuilder();
+        for (Element element : this) {
+            if (sb.length() != 0)
+                sb.append("\n");
+            sb.append(element.outerHtml());
+        }
+        return StringUtil.releaseBuilder(sb);
+    }
+
+    /**
+     * Get the combined outer HTML of all matched elements. Alias of {@link #outerHtml()}.
+     * @return string of all element's outer HTML.
+     * @see #text()
+     * @see #html()
+     */
+    @Override
+    public String toString() {
+        return outerHtml();
     }
 
     /**
@@ -313,17 +333,6 @@ public class Elements extends Nodes<Element> {
         }
         return this;
     }
-
-    /**
-     Add the supplied node to the start of each matched element's inner HTML. The node is cloned for each target.
-
-     @param node the node to add inside each element, before the existing HTML
-     @return this, for chaining
-     @see Element#prependChild(Node)
-     */
-    public Elements prepend(Node node) {
-        return insert(node, Element::prependChild);
-    }
     
     /**
      * Add the supplied HTML to the end of each matched element's inner HTML.
@@ -337,77 +346,30 @@ public class Elements extends Nodes<Element> {
         }
         return this;
     }
-
+    
     /**
-     Add the supplied node to the end of each matched element's inner HTML. The node is cloned for each target.
-
-     @param node the node to add inside each element, after the existing HTML
-     @return this, for chaining
-     @see Element#appendChild(Node)
+     * Insert the supplied HTML before each matched element's outer HTML.
+     * @param html HTML to insert before each element
+     * @return this, for chaining
+     * @see Element#before(String)
      */
-    public Elements append(Node node) {
-        return insert(node, Element::appendChild);
-    }
-
-    /**
-     Insert the supplied HTML before each matched element's outer HTML.
-
-     @param html HTML to insert before each element
-     @return this, for chaining
-     @see Element#before(String)
-     */
-    @Override
     public Elements before(String html) {
-        super.before(html);
+        for (Element element : this) {
+            element.before(html);
+        }
         return this;
     }
-
+    
     /**
-     Insert the supplied node before each matched element's outer HTML. The node is cloned for each target.
-
-     @param node the node to insert before each element
-     @return this, for chaining
-     @see Element#before(Node)
+     * Insert the supplied HTML after each matched element's outer HTML.
+     * @param html HTML to insert after each element
+     * @return this, for chaining
+     * @see Element#after(String)
      */
-    public Elements before(Node node) {
-        return insert(node, Element::before);
-    }
-
-    /**
-     Insert the supplied HTML after each matched element's outer HTML.
-
-     @param html HTML to insert after each element
-     @return this, for chaining
-     @see Element#after(String)
-     */
-    @Override
     public Elements after(String html) {
-        super.after(html);
-        return this;
-    }
-
-    /**
-     Insert the supplied node after each matched element's outer HTML. The node is cloned for each target.
-
-     @param node the node to insert after each element
-     @return this, for chaining
-     @see Element#after(Node)
-     */
-    public Elements after(Node node) {
-        return insert(node, Element::after);
-    }
-
-    /**
-     Applies a node insertion to each matched element, cloning the node for each target.
-
-     @param node     the node to insert
-     @param inserter the insertion operation
-     @return this, for chaining
-     */
-    private Elements insert(Node node, BiConsumer<Element, Node> inserter) {
-        Validate.notNull(node);
-        for (Element element : this)
-            inserter.accept(element, node.clone());
+        for (Element element : this) {
+            element.after(html);
+        }
         return this;
     }
 
@@ -416,14 +378,15 @@ public class Elements extends Nodes<Element> {
      {@code <p><b>This</b> is <b>Jsoup</b></p>},
      <code>doc.select("b").wrap("&lt;i&gt;&lt;/i&gt;");</code>
      becomes {@code <p><i><b>This</b></i> is <i><b>jsoup</b></i></p>}
-
      @param html HTML to wrap around each element, e.g. {@code <div class="head"></div>}. Can be arbitrarily deep.
      @return this (for chaining)
      @see Element#wrap
      */
-    @Override
     public Elements wrap(String html) {
-        super.wrap(html);
+        Validate.notEmpty(html);
+        for (Element element : this) {
+            element.wrap(html);
+        }
         return this;
     }
 
@@ -468,7 +431,6 @@ public class Elements extends Nodes<Element> {
 
     /**
      * Remove each matched element from the DOM. This is similar to setting the outer HTML of each element to nothing.
-     * <p>The elements will still be retained in this list, in case further processing of them is desired.</p>
      * <p>
      * E.g. HTML: {@code <div><p>Hello</p> <p>there</p> <img /></div>}<br>
      * <code>doc.select("p").remove();</code><br>
@@ -478,11 +440,11 @@ public class Elements extends Nodes<Element> {
      * @return this, for chaining
      * @see Element#empty()
      * @see #empty()
-     * @see #clear()
      */
-    @Override
     public Elements remove() {
-        super.remove();
+        for (Element element : this) {
+            element.remove();
+        }
         return this;
     }
     
@@ -495,35 +457,6 @@ public class Elements extends Nodes<Element> {
      */
     public Elements select(String query) {
         return Selector.select(query, this);
-    }
-
-    /**
-     Find the first Element that matches the {@link Selector} CSS query within this element list.
-     <p>This is effectively the same as calling {@code elements.select(query).first()}, but is more efficient as query
-     execution stops on the first hit.</p>
-
-     @param cssQuery a {@link Selector} query
-     @return the first matching element, or <b>{@code null}</b> if there is no match.
-     @see #expectFirst(String)
-     @since 1.19.1
-     */
-    public @Nullable Element selectFirst(String cssQuery) {
-        return Selector.selectFirst(cssQuery, this);
-    }
-
-    /**
-     Just like {@link #selectFirst(String)}, but if there is no match, throws an {@link IllegalArgumentException}.
-
-     @param cssQuery a {@link Selector} query
-     @return the first matching element
-     @throws IllegalArgumentException if no match is found
-     @since 1.19.1
-     */
-    public Element expectFirst(String cssQuery) {
-        return Validate.expectNotNull(
-            Selector.selectFirst(cssQuery, this),
-            "No elements matched the query '%s' in the elements.", cssQuery
-        );
     }
 
     /**
@@ -558,7 +491,7 @@ public class Elements extends Nodes<Element> {
      * @return true if at least one element in the list matches the query.
      */
     public boolean is(String query) {
-        Evaluator eval = Selector.evaluatorOf(query);
+        Evaluator eval = QueryParser.parse(query);
         for (Element e : this) {
             if (e.is(eval))
                 return true;
@@ -636,12 +569,15 @@ public class Elements extends Nodes<Element> {
 
     private Elements siblings(@Nullable String query, boolean next, boolean all) {
         Elements els = new Elements();
-        Evaluator eval = query != null? Selector.evaluatorOf(query) : null;
+        Evaluator eval = query != null? QueryParser.parse(query) : null;
         for (Element e : this) {
             do {
                 Element sib = next ? e.nextElementSibling() : e.previousElementSibling();
                 if (sib == null) break;
-                if (eval == null || sib.is(eval)) els.add(sib);
+                if (eval == null)
+                    els.add(sib);
+                else if (sib.is(eval))
+                    els.add(sib);
                 e = sib;
             } while (all);
         }
@@ -665,18 +601,16 @@ public class Elements extends Nodes<Element> {
      Get the first matched element.
      @return The first matched element, or <code>null</code> if contents is empty.
      */
-    @Override
     public @Nullable Element first() {
-        return super.first();
+        return isEmpty() ? null : get(0);
     }
 
     /**
      Get the last matched element.
      @return The last matched element, or <code>null</code> if contents is empty.
      */
-    @Override
     public @Nullable Element last() {
-        return super.last();
+        return isEmpty() ? null : get(size() - 1);
     }
 
     /**
@@ -749,45 +683,4 @@ public class Elements extends Nodes<Element> {
         return nodes;
     }
 
-    // list methods that update the DOM:
-
-    /**
-     Replace the Element at the specified index in this list, and in the DOM.
-
-     @param index index of the element to replace
-     @param element element to be stored at the specified position
-     @return the old Element at this index
-     @since 1.17.1
-     */
-    @Override
-    public Element set(int index, Element element) {
-        return super.set(index, element);
-    }
-
-    /**
-     Remove the Element at the specified index in this ist, and from the DOM.
-
-     @param index the index of the element to be removed
-     @return the old element at this index
-     @see #deselect(int)
-     @since 1.17.1
-     */
-    @Override
-    public Element remove(int index) {
-        return super.remove(index);
-    }
-
-
-    /**
-     Remove the Element at the specified index in this list, but not from the DOM.
-
-     @param index the index of the element to be removed
-     @return the old element at this index
-     @see #remove(int)
-     @since 1.19.2
-     */
-    @Override
-    public Element deselect(int index) {
-        return super.deselect(index);
-    }
 }

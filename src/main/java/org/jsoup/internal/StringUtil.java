@@ -1,16 +1,15 @@
 package org.jsoup.internal;
 
 import org.jsoup.helper.Validate;
-import org.jspecify.annotations.Nullable;
 
+import javax.annotation.Nullable;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.Stack;
 import java.util.regex.Pattern;
-import java.util.stream.Collector;
-import java.util.stream.Collectors;
 
 /**
  A minimal String utility class. Designed for <b>internal</b> jsoup use only - the API and outcome may change without
@@ -148,8 +147,8 @@ public final class StringUtil {
      * @param string string to test
      * @return if string is blank
      */
-    public static boolean isBlank(@Nullable String string) {
-        if (string == null || string.isEmpty())
+    public static boolean isBlank(final String string) {
+        if (string == null || string.length() == 0)
             return true;
 
         int l = string.length();
@@ -172,7 +171,7 @@ public final class StringUtil {
     }
 
     /**
-     * Tests if a string is numeric, i.e. contains only ASCII digit characters
+     * Tests if a string is numeric, i.e. contains only digit characters
      * @param string string to test
      * @return true if only digit chars, false if empty or null or contains non-digit chars
      */
@@ -182,18 +181,10 @@ public final class StringUtil {
 
         int l = string.length();
         for (int i = 0; i < l; i++) {
-            if (!isDigit(string.charAt(i)))
+            if (!Character.isDigit(string.codePointAt(i)))
                 return false;
         }
         return true;
-    }
-
-    /** Trims leading and trailing ASCII whitespace. */
-    public static String trimAsciiWhitespace(String input) {
-        int start = 0, end = input.length();
-        while (start < end && isWhitespace(input.charAt(start))) start++;
-        while (end > start && isWhitespace(input.charAt(end - 1))) end--;
-        return input.substring(start, end);
     }
 
     /**
@@ -271,13 +262,6 @@ public final class StringUtil {
     }
 
     public static boolean inSorted(String needle, String[] haystack) {
-        if (haystack.length <= 8) { // Parser benchmarking showed that it's faster to scan than binary search for these lengths
-            for (int i = 0; i < haystack.length; i++) {
-                if (needle.equals(haystack[i]))
-                    return true;
-            }
-            return false;
-        }
         return Arrays.binarySearch(haystack, needle) >= 0;
     }
 
@@ -297,7 +281,7 @@ public final class StringUtil {
         return true;
     }
 
-    private static final Pattern extraDotSegmentsPattern = Pattern.compile("^/(?>(?>\\.\\.?/)+)");
+    private static final Pattern extraDotSegmentsPattern = Pattern.compile("^/((\\.{1,2}/)+)");
     /**
      * Create a new absolute URL, from a provided existing absolute URL and a relative URL component.
      * @param base the existing absolute base URL
@@ -316,9 +300,7 @@ public final class StringUtil {
         if (url.getRef() != null) {
             fixedFile = fixedFile + "#" + url.getRef();
         }
-        URL resolved = new URL(url.getProtocol(), url.getHost(), url.getPort(), fixedFile);
-        validateHttpUrl(resolved);
-        return resolved;
+        return new URL(url.getProtocol(), url.getHost(), url.getPort(), fixedFile);
     }
 
     /**
@@ -331,61 +313,29 @@ public final class StringUtil {
         // workaround: java will allow control chars in a path URL and may treat as relative, but Chrome / Firefox will strip and may see as a scheme. Normalize to browser's view.
         baseUrl = stripControlChars(baseUrl); relUrl = stripControlChars(relUrl);
         try {
-            URL base = new URL(baseUrl);
+            URL base;
+            try {
+                base = new URL(baseUrl);
+            } catch (MalformedURLException e) {
+                // the base is unsuitable, but the attribute/rel may be abs on its own, so try that
+                URL abs = new URL(relUrl);
+                return abs.toExternalForm();
+            }
             return resolve(base, relUrl).toExternalForm();
         } catch (MalformedURLException e) {
-            try {
-                // the base is unsuitable, or resolution failed; the attribute/rel may be abs on its own
-                URL abs = new URL(relUrl);
-                validateHttpUrl(abs);
-                return abs.toExternalForm();
-            } catch (MalformedURLException ignored) {
-                // it may still be valid, just that Java doesn't have a registered stream handler for it, e.g. tel
-                // we test here vs at start to normalize supported URLs (e.g. HTTP -> http)
-                return validUriScheme.matcher(relUrl).find() && !hasHttpScheme(relUrl) ? relUrl : "";
-            }
+            // it may still be valid, just that Java doesn't have a registered stream handler for it, e.g. tel
+            // we test here vs at start to normalize supported URLs (e.g. HTTP -> http)
+            return validUriScheme.matcher(relUrl).find() ? relUrl : "";
         }
     }
     private static final Pattern validUriScheme = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+-.]*:");
-
-    /** Validates that an HTTP(S) URL has the host required by its scheme. */
-    private static void validateHttpUrl(URL url) throws MalformedURLException {
-        if (isHttpScheme(url.getProtocol()) && url.getHost().isEmpty())
-            throw new MalformedURLException("Invalid URL: host is missing");
-    }
-
-    /** Tests if the supplied scheme is HTTP or HTTPS. */
-    public static boolean isHttpScheme(String scheme) {
-        return scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https");
-    }
-
-    /** Tests if the supplied value starts with an HTTP or HTTPS scheme. */
-    public static boolean hasHttpScheme(String value) {
-        int colon = value.indexOf(':');
-        return colon > 0 && isHttpScheme(value.substring(0, colon));
-    }
 
     private static final Pattern controlChars = Pattern.compile("[\\x00-\\x1f]*"); // matches ascii 0 - 31, to strip from url
     private static String stripControlChars(final String input) {
         return controlChars.matcher(input).replaceAll("");
     }
 
-    private static final int InitBuilderSize = 1024;
-    private static final int MaxBuilderSize = 8 * 1024;
-    private static final SoftPool<StringBuilder> BuilderPool = new SoftPool<>(
-        () -> new StringBuilder(InitBuilderSize));
-
-    /**
-     Concatenates a character and string using a pooled builder.
-     @param first the leading character
-     @param second the following string
-     @return the concatenated string
-     */
-    public static String concat(char first, String second) {
-        StringBuilder builder = borrowBuilder();
-        builder.append(first).append(second);
-        return releaseBuilder(builder);
-    }
+    private static final ThreadLocal<Stack<StringBuilder>> threadLocalBuilders = ThreadLocal.withInitial(Stack::new);
 
     /**
      * Maintains cached StringBuilders in a flyweight pattern, to minimize new StringBuilder GCs. The StringBuilder is
@@ -395,7 +345,10 @@ public final class StringUtil {
      * @return an empty StringBuilder
      */
     public static StringBuilder borrowBuilder() {
-        return BuilderPool.borrow();
+        Stack<StringBuilder> builders = threadLocalBuilders.get();
+        return builders.empty() ?
+            new StringBuilder(MaxCachedBuilderSize) :
+            builders.pop();
     }
 
     /**
@@ -407,49 +360,21 @@ public final class StringUtil {
     public static String releaseBuilder(StringBuilder sb) {
         Validate.notNull(sb);
         String string = sb.toString();
-        releaseBuilderVoid(sb);
+
+        if (sb.length() > MaxCachedBuilderSize)
+            sb = new StringBuilder(MaxCachedBuilderSize); // make sure it hasn't grown too big
+        else
+            sb.delete(0, sb.length()); // make sure it's emptied on release
+
+        Stack<StringBuilder> builders = threadLocalBuilders.get();
+        builders.push(sb);
+
+        while (builders.size() > MaxIdleBuilders) {
+            builders.pop();
+        }
         return string;
     }
 
-    /**
-     Releases a borrowed builder, but does not call .toString() on it. Useful in case you already have that string.
-     @param sb the StringBuilder to release.
-     @see #releaseBuilder(StringBuilder)
-     */
-    public static void releaseBuilderVoid(StringBuilder sb) {
-        // if it hasn't grown too big, reset it and return it to the pool:
-        if (sb.length() <= MaxBuilderSize) {
-            sb.delete(0, sb.length()); // make sure it's emptied on release
-            BuilderPool.release(sb);
-        }
-    }
-
-    /**
-     * Return a {@link Collector} similar to the one returned by {@link Collectors#joining(CharSequence)},
-     * but backed by jsoup's {@link StringJoiner}, which allows for more efficient garbage collection.
-     *
-     * @param delimiter The delimiter for separating the strings.
-     * @return A {@code Collector} which concatenates CharSequence elements, separated by the specified delimiter
-     */
-    public static Collector<CharSequence, ?, String> joining(String delimiter) {
-        return Collector.of(() -> new StringJoiner(delimiter),
-            StringJoiner::add,
-            (j1, j2) -> {
-                j1.append(j2.complete());
-                return j1;
-            },
-            StringJoiner::complete);
-    }
-
-    public static boolean isAsciiLetter(char c) {
-        return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z';
-    }
-
-    public static boolean isDigit(char c) {
-        return c >= '0' && c <= '9';
-    }
-
-    public static boolean isHexDigit(char c) {
-        return isDigit(c) || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F';
-    }
+    private static final int MaxCachedBuilderSize = 8 * 1024;
+    private static final int MaxIdleBuilders = 8;
 }

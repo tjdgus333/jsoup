@@ -2,11 +2,8 @@ package org.jsoup.select;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
 import org.junit.jupiter.api.Test;
 
-import static org.jsoup.select.EvaluatorDebug.sexpr;
-import static org.jsoup.select.Selector.SelectorParseException;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -21,143 +18,74 @@ public class QueryParserTest {
                 "<a><li><strong>l2</strong></li></a>" +
                 "<p><strong>yes</strong></p>" +
                 "</body></html>");
-        assertEquals("l1 yes", doc.body().select(">p>strong,>li>strong").text()); // selecting immediate from body
-        assertEquals("l1 yes", doc.body().select(" > p > strong , > li > strong").text()); // space variants
+        assertEquals("l1 l2 yes", doc.body().select(">p>strong,>*>li>strong").text());
         assertEquals("l2 yes", doc.select("body>p>strong,body>*>li>strong").text());
-        assertEquals("l2 yes", doc.select("body>*>li>strong,body>p>strong").text());
-        assertEquals("l2 yes", doc.select("body>p>strong,body>*>li>strong").text());
+        assertEquals("yes", doc.select(">body>*>li>strong,>body>p>strong").text());
+        assertEquals("l2", doc.select(">body>p>strong,>body>*>li>strong").text());
     }
 
     @Test public void testImmediateParentRun() {
         String query = "div > p > bold.brass";
-        assertEquals("(ImmediateParentRun (Tag 'div')(Tag 'p')(And (Tag 'bold')(Class '.brass')))", sexpr(query));
+        Evaluator eval1 = QueryParser.parse(query);
+        assertEquals(query, eval1.toString());
 
-        /*
-        <ImmediateParentRun css="div > p > bold.brass" cost="11">
-          <Tag css="div" cost="1"></Tag>
-          <Tag css="p" cost="1"></Tag>
-          <And css="bold.brass" cost="7">
-            <Tag css="bold" cost="1"></Tag>
-            <Class css=".brass" cost="6"></Class>
-          </And>
-        </ImmediateParentRun>
-         */
+        StructuralEvaluator.ImmediateParentRun run = (StructuralEvaluator.ImmediateParentRun) eval1;
+        assertTrue(run.evaluators.get(0) instanceof Evaluator.Tag);
+        assertTrue(run.evaluators.get(1) instanceof Evaluator.Tag);
+        assertTrue(run.evaluators.get(2) instanceof CombiningEvaluator.And);
     }
 
     @Test public void testOrGetsCorrectPrecedence() {
         // tests that a selector "a b, c d, e f" evals to (a AND b) OR (c AND d) OR (e AND f)"
         // top level or, three child ands
-        String query = "a b, c d, e f";
-        String parsed = sexpr(query);
-        assertEquals("(Or (And (Tag 'b')(Ancestor (Tag 'a')))(And (Tag 'd')(Ancestor (Tag 'c')))(And (Tag 'f')(Ancestor (Tag 'e'))))", parsed);
-
-        /*
-        <Or css="a b, c d, e f" cost="9">
-          <And css="a b" cost="3">
-            <Tag css="b" cost="1"></Tag>
-            <Parent css="a " cost="2">
-              <Tag css="a" cost="1"></Tag>
-            </Parent>
-          </And>
-          <And css="c d" cost="3">
-            <Tag css="d" cost="1"></Tag>
-            <Parent css="c " cost="2">
-              <Tag css="c" cost="1"></Tag>
-            </Parent>
-          </And>
-          <And css="e f" cost="3">
-            <Tag css="f" cost="1"></Tag>
-            <Parent css="e " cost="2">
-              <Tag css="e" cost="1"></Tag>
-            </Parent>
-          </And>
-        </Or>
-         */
+        Evaluator eval = QueryParser.parse("a b, c d, e f");
+        assertTrue(eval instanceof CombiningEvaluator.Or);
+        CombiningEvaluator.Or or = (CombiningEvaluator.Or) eval;
+        assertEquals(3, or.evaluators.size());
+        for (Evaluator innerEval: or.evaluators) {
+            assertTrue(innerEval instanceof CombiningEvaluator.And);
+            CombiningEvaluator.And and = (CombiningEvaluator.And) innerEval;
+            assertEquals(2, and.evaluators.size());
+            assertTrue(and.evaluators.get(0) instanceof StructuralEvaluator.Parent);
+            assertTrue(and.evaluators.get(1) instanceof Evaluator.Tag);
+        }
     }
 
     @Test public void testParsesMultiCorrectly() {
-        String query = ".foo.qux[attr=bar] > ol.bar, ol > li + li";
-        String parsed = sexpr(query);
-        assertEquals("(Or (And (Tag 'li')(ImmediatePreviousSibling (ImmediateParentRun (Tag 'ol')(Tag 'li'))))(ImmediateParentRun (And (AttributeWithValue '[attr=bar]')(Class '.foo')(Class '.qux'))(And (Tag 'ol')(Class '.bar'))))", parsed);
+        String query = ".foo.qux > ol.bar, ol > li + li";
+        Evaluator eval = QueryParser.parse(query);
+        assertTrue(eval instanceof CombiningEvaluator.Or);
+        CombiningEvaluator.Or or = (CombiningEvaluator.Or) eval;
+        assertEquals(2, or.evaluators.size());
 
-        /*
-        <Or css=".foo.qux[attr=bar] > ol.bar, ol > li + li" cost="31">
-          <And css="ol > li + li" cost="7">
-            <Tag css="li" cost="1"></Tag>
-            <ImmediatePreviousSibling css="ol > li + " cost="6">
-              <ImmediateParentRun css="ol > li" cost="4">
-                <Tag css="ol" cost="1"></Tag>
-                <Tag css="li" cost="1"></Tag>
-              </ImmediateParentRun>
-            </ImmediatePreviousSibling>
-          </And>
-          <ImmediateParentRun css=".foo.qux[attr=bar] > ol.bar" cost="24">
-            <And css=".foo.qux[attr=bar]" cost="15">
-              <AttributeWithValue css="[attr=bar]" cost="3"></AttributeWithValue>
-              <Class css=".foo" cost="6"></Class>
-              <Class css=".qux" cost="6"></Class>
-            </And>
-            <And css="ol.bar" cost="7">
-              <Tag css="ol" cost="1"></Tag>
-              <Class css=".bar" cost="6"></Class>
-            </And>
-          </ImmediateParentRun>
-        </Or>
-         */
+        StructuralEvaluator.ImmediateParentRun run = (StructuralEvaluator.ImmediateParentRun) or.evaluators.get(0);
+        CombiningEvaluator.And andRight = (CombiningEvaluator.And) or.evaluators.get(1);
+
+        assertEquals(".foo.qux > ol.bar", run.toString());
+        assertEquals(2, run.evaluators.size());
+        Evaluator runAnd = run.evaluators.get(0);
+        assertTrue(runAnd instanceof CombiningEvaluator.And);
+        assertEquals(".foo.qux", runAnd.toString());
+        assertEquals("ol > li + li", andRight.toString());
+        assertEquals(2, andRight.evaluators.size());
+        assertEquals(query, eval.toString());
     }
 
-    @Test void idDescenderClassOrder() {
-        // https://github.com/jhy/jsoup/issues/2254
-        // '#id .class' cost
-        String query = "#id .class";
-        String parsed = sexpr(query);
-        assertEquals("(And (Class '.class')(Ancestor (Id '#id')))", parsed);
+    @Test public void exceptionOnUncloseAttribute() {
+        assertThrows(Selector.SelectorParseException.class, () -> QueryParser.parse("section > a[href=\"]"));
+    }
 
-        /*
-        <And css="#id .class" cost="22">
-         <Class css=".class" cost="6"></Class>
-         <Ancestor css="#id " cost="16">
-          <Id css="#id" cost="2"></Id>
-         </Ancestor>
-        </And>
-         */
+    @Test public void testParsesSingleQuoteInContains() {
+        assertThrows(Selector.SelectorParseException.class, () -> QueryParser.parse("p:contains(One \" One)"));
     }
 
 
-    @Test
-    public void exceptionOnUncloseAttribute() {
-        Selector.SelectorParseException exception =
-            assertThrows(Selector.SelectorParseException.class, () -> QueryParser.parse("section > a[href=\"]"));
-        assertEquals(
-            "Did not find balanced marker at 'href=\"]'",
-            exception.getMessage());
+    @Test public void exceptOnEmptySelector() {
+        assertThrows(Selector.SelectorParseException.class, () -> QueryParser.parse(""));
     }
 
-    @Test
-    public void testParsesSingleQuoteInContains() {
-        Selector.SelectorParseException exception =
-            assertThrows(Selector.SelectorParseException.class, () -> QueryParser.parse("p:contains(One \" One)"));
-        assertEquals("Did not find balanced marker at 'One \" One)'",
-            exception.getMessage());
-    }
-
-    @Test
-    public void exceptOnEmptySelector() {
-        SelectorParseException exception = assertThrows(SelectorParseException.class, () -> QueryParser.parse(""));
-        assertEquals("String must not be empty", exception.getMessage());
-    }
-
-    @Test
-    public void exceptOnNullSelector() {
-        SelectorParseException exception = assertThrows(SelectorParseException.class, () -> QueryParser.parse(null));
-        assertEquals("String must not be empty", exception.getMessage());
-    }
-
-    @Test
-    public void exceptOnUnhandledEvaluator() {
-        SelectorParseException exception =
-            assertThrows(SelectorParseException.class, () -> QueryParser.parse("div / foo"));
-        assertEquals("Could not parse query 'div / foo': unexpected token at '/ foo'", exception.getMessage());
+    @Test public void exceptOnNullSelector() {
+        assertThrows(Selector.SelectorParseException.class, () -> QueryParser.parse(null));
     }
 
     @Test public void okOnSpacesForeAndAft() {
@@ -169,146 +97,5 @@ public class QueryParserTest {
         String q = "a:not(:has(span.foo)) b d > e + f ~ g";
         Evaluator parse = QueryParser.parse(q);
         assertEquals(q, parse.toString());
-        String parsed = sexpr(q);
-        assertEquals("(And (Tag 'g')(PreviousSibling (And (Tag 'f')(ImmediatePreviousSibling (ImmediateParentRun (And (Tag 'd')(Ancestor (And (Tag 'b')(Ancestor (And (Tag 'a')(Not (Has (And (Tag 'span')(Class '.foo')))))))))(Tag 'e'))))))", parsed);
-    }
-
-    @Test public void parsesOrAfterAttribute() {
-        // https://github.com/jhy/jsoup/issues/2073
-        String q = "#parent [class*=child], .some-other-selector .nested";
-        String parsed = sexpr(q);
-        assertEquals("(Or (And (AttributeWithValueContaining '[class*=child]')(Ancestor (Id '#parent')))(And (Class '.nested')(Ancestor (Class '.some-other-selector'))))", parsed);
-
-        assertEquals("(Or (Class '.some-other-selector')(And (AttributeWithValueContaining '[class*=child]')(Ancestor (Id '#parent'))))", sexpr("#parent [class*=child], .some-other-selector"));
-        assertEquals("(Or (And (Id '#el')(AttributeWithValueContaining '[class*=child]'))(Class '.some-other-selector'))", sexpr("#el[class*=child], .some-other-selector"));
-        assertEquals("(Or (And (AttributeWithValueContaining '[class*=child]')(Ancestor (Id '#parent')))(And (Class '.nested')(Ancestor (Class '.some-other-selector'))))", sexpr("#parent [class*=child], .some-other-selector .nested"));
-    }
-
-    @Test void parsesEscapedSubqueries() {
-        String html = "<div class='-4a'>One</div> <div id='-4a'>Two</div>";
-        Document doc = Jsoup.parse(html);
-
-        String classQ = "div.-\\34 a";
-        Element div1 = doc.expectFirst(classQ);
-        assertEquals("One", div1.wholeText());
-
-        String idQ = "#-\\34 a";
-        Element div2 = doc.expectFirst(idQ);
-        assertEquals("Two", div2.wholeText());
-
-        String genClassQ = "html > body > div.-\\34 a";
-        assertEquals(genClassQ, div1.cssSelector());
-        assertSame(div1, doc.expectFirst(genClassQ));
-
-        String deepIdQ = "html > body > #-\\34 a";
-        assertEquals(idQ, div2.cssSelector());
-        assertSame(div2, doc.expectFirst(deepIdQ));
-
-        assertEquals("(ImmediateParentRun (Tag 'html')(Tag 'body')(And (Tag 'div')(Class '.-4a')))", sexpr(genClassQ));
-        assertEquals("(ImmediateParentRun (Tag 'html')(Tag 'body')(Id '#-4a'))", sexpr(deepIdQ));
-    }
-
-    @Test void trailingParens() {
-        SelectorParseException exception =
-            assertThrows(SelectorParseException.class, () -> QueryParser.parse("div:has(p))"));
-        assertEquals("Could not parse query 'div:has(p))': unexpected token at ')'", exception.getMessage());
-    }
-
-    @Test void consecutiveCombinators() {
-        Selector.SelectorParseException exception1 =
-                assertThrows(Selector.SelectorParseException.class, () -> QueryParser.parse("div>>p"));
-        assertEquals(
-                "Could not parse query 'div>>p': unexpected token at '>p'",
-                exception1.getMessage());
-
-        Selector.SelectorParseException exception2 =
-                assertThrows(Selector.SelectorParseException.class, () -> QueryParser.parse("+ + div"));
-        assertEquals(
-                "Could not parse query '+ + div': unexpected token at '+ div'",
-                exception2.getMessage());
-    }
-
-    @Test void hasNodeSelector() {
-        String q = "p:has(::comment:contains(some text))";
-        Evaluator e = QueryParser.parse(q);
-        assertEquals("(And (Tag 'p')(Has (And (InstanceType '::comment')(ContainsValue ':contains(some text)'))))", sexpr(e));
-        assertEquals(q, e.toString());
-    }
-
-    @Test void processingInstructionNodeSelector() {
-        assertEquals("::pi", QueryParser.parse("::pi").toString());
-        assertEquals("::pi(marker)", QueryParser.parse("::pi( marker )").toString());
-        assertEquals(
-            "::pi(marker)[name=country-options]",
-            QueryParser.parse("::pi(marker)[name=country-options]").toString()
-        );
-    }
-
-    @Test void processingInstructionTargetErrors() {
-        SelectorParseException empty = assertThrows(SelectorParseException.class, () -> QueryParser.parse("::pi()"));
-        assertEquals("::pi target must not be empty", empty.getMessage());
-
-        SelectorParseException trailing = assertThrows(
-            SelectorParseException.class,
-            () -> QueryParser.parse("::pi(marker other)")
-        );
-        assertEquals("::pi target must be a CSS identifier", trailing.getMessage());
-    }
-
-    @Test void choosesHasTraversalScope() {
-        assertHasScope("> a", HasEvaluator.Scope.Children);
-        assertHasScope("+ div", HasEvaluator.Scope.NextSibling);
-        assertHasScope("+ ::comment", HasEvaluator.Scope.FollowingSiblings);
-        assertHasScope("~ p", HasEvaluator.Scope.FollowingSiblings);
-        assertHasScope("+ div span", HasEvaluator.Scope.NextSiblingTree);
-        assertHasScope("+ div + section", HasEvaluator.Scope.FollowingSiblingTrees);
-        assertHasScope("~ p span", HasEvaluator.Scope.FollowingSiblingTrees);
-        assertHasScope("p", HasEvaluator.Scope.Descendants);
-    }
-
-    @Test void nestedSelectorsDoNotAffectHasTraversalScope() {
-        assertHasScope("> div:is(section > div)", HasEvaluator.Scope.Children);
-        assertHasScope("+ div:has(> p + span)", HasEvaluator.Scope.NextSibling);
-        assertHasScope("+ div:is(section > div) span", HasEvaluator.Scope.NextSiblingTree);
-        assertHasScope("div:is(section > div)", HasEvaluator.Scope.Descendants);
-    }
-
-    @Test void groupsHasAlternativesByTraversalScope() {
-        HasEvaluator has = (HasEvaluator) QueryParser.parse(":has(> a, > span, + div, ~ p, + div span, p)");
-        assertEquals(5, has.traversals.size());
-        assertEquals(HasEvaluator.Scope.Children, has.traversals.get(0).scope);
-        assertInstanceOf(CombiningEvaluator.Or.class, has.traversals.get(0).evaluator);
-        // grouping keeps the original selectors for toString()
-        assertEquals(":has(" + QueryParser.parse("> a, > span, + div, ~ p, + div span, p") + ")", has.toString());
-    }
-
-    @Test void hasRetainsCanonicalSelectorText() {
-        Evaluator has = QueryParser.parse(":has( > A, SPAN.foo )");
-        assertEquals(":has(> > a, span.foo)", has.toString());
-    }
-
-    @Test void notRequiresNonEmptySelector() {
-        for (String query : new String[] {"p:not()", "p:not( )"}) {
-            SelectorParseException exception = assertThrows(SelectorParseException.class,
-                () -> QueryParser.parse(query));
-            assertEquals(":not(selector) subselect must not be empty", exception.getMessage());
-        }
-    }
-
-    @Test void hasTraversalRemovesOnlyEstablishedRelationship() {
-        assertEquals("a[href]", hasTraversal("> a[href]").evaluator.toString());
-        assertEquals("div", hasTraversal("+ div").evaluator.toString());
-        assertEquals("p", hasTraversal("~ p").evaluator.toString());
-        assertEquals("> + ::comment", hasTraversal("+ ::comment").evaluator.toString());
-        assertEquals("> > section a", hasTraversal("> section a").evaluator.toString());
-    }
-
-    private static HasEvaluator.Traversal hasTraversal(String selector) {
-        HasEvaluator has = (HasEvaluator) QueryParser.parse(":has(" + selector + ")");
-        return has.traversals.get(0);
-    }
-
-    private static void assertHasScope(String selector, HasEvaluator.Scope expected) {
-        assertEquals(expected, hasTraversal(selector).scope, selector);
     }
 }

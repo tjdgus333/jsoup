@@ -9,11 +9,7 @@ import org.jsoup.select.Elements;
 import java.io.IOException;
 
 /**
- Example program to list links from a URL.
- <p>To invoke from the command line, assuming you've downloaded the jsoup-examples
- jar to your current directory:</p>
- <p><code>java -cp jsoup-examples.jar org.jsoup.examples.ListLinks url</code></p>
- where <i>url</i> is the URL to fetch.
+ * Example program to list links from a URL.
  */
 public class ListLinks {
     public static void main(String[] args) throws IOException {
@@ -28,7 +24,7 @@ public class ListLinks {
 
         print("\nMedia: (%d)", media.size());
         for (Element src : media) {
-            if (src.nameIs("img"))
+            if (src.normalName().equals("img"))
                 print(" * %s: <%s> %sx%s (%s)",
                         src.tagName(), src.attr("abs:src"), src.attr("width"), src.attr("height"),
                         trim(src.attr("alt"), 20));

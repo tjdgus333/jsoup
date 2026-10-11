@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
+import org.jsoup.integration.UrlConnectTest;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -23,6 +24,7 @@ class BuildEntities {
         String url = "https://www.w3.org/TR/2012/WD-html5-20121025/entities.json";
         Connection.Response res = Jsoup.connect(url)
             .ignoreContentType(true)
+            .userAgent(UrlConnectTest.browserUa)
             .execute();
 
         Gson gson = new Gson();
@@ -103,6 +105,12 @@ class BuildEntities {
         return Integer.toString(d, Entities.codepointRadix);
     }
 
+    private static class ByName implements Comparator<CharacterRef> {
+        public int compare(CharacterRef o1, CharacterRef o2) {
+            return o1.name.compareTo(o2.name);
+        }
+    }
+
     private static class ByCode implements Comparator<CharacterRef> {
         public int compare(CharacterRef o1, CharacterRef o2) {
             int[] c1 = o1.codepoints;
@@ -123,6 +131,6 @@ class BuildEntities {
         }
     }
 
-    private static final Comparator<CharacterRef> byName = Comparator.comparing(ref -> ref.name);
-    private static final ByCode byCode = new ByCode();
+    private static ByName byName = new ByName();
+    private static ByCode byCode = new ByCode();
 }

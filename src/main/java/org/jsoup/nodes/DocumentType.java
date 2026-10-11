@@ -1,11 +1,10 @@
 package org.jsoup.nodes;
 
-import org.jsoup.internal.QuietAppendable;
 import org.jsoup.internal.StringUtil;
 import org.jsoup.helper.Validate;
 import org.jsoup.nodes.Document.OutputSettings.Syntax;
-import org.jspecify.annotations.Nullable;
 
+import java.io.IOException;
 
 /**
  * A {@code <!DOCTYPE>} node.
@@ -14,11 +13,11 @@ public class DocumentType extends LeafNode {
     // todo needs a bit of a chunky cleanup. this level of detail isn't needed
     public static final String PUBLIC_KEY = "PUBLIC";
     public static final String SYSTEM_KEY = "SYSTEM";
-    private static final String NameKey = "name";
-    private static final String PubSysKey = "pubSysKey"; // PUBLIC or SYSTEM
-    private static final String PublicId = "publicId";
-    private static final String SystemId = "systemId";
-    private static final String InternalSubsetKey = Attributes.internalKey("doctypeInternalSubset");
+    private static final String NAME = "name";
+    private static final String PUB_SYS_KEY = "pubSysKey"; // PUBLIC or SYSTEM
+    private static final String PUBLIC_ID = "publicId";
+    private static final String SYSTEM_ID = "systemId";
+    // todo: quirk mode from publicId and systemId
 
     /**
      * Create a new doctype element.
@@ -27,34 +26,25 @@ public class DocumentType extends LeafNode {
      * @param systemId the doctype's system ID
      */
     public DocumentType(String name, String publicId, String systemId) {
-        super(name);
+        Validate.notNull(name);
         Validate.notNull(publicId);
         Validate.notNull(systemId);
-        attributes()
-            .add(NameKey, name)
-            .add(PublicId, publicId)
-            .add(SystemId, systemId);
+        attr(NAME, name);
+        attr(PUBLIC_ID, publicId);
+        attr(SYSTEM_ID, systemId);
         updatePubSyskey();
     }
 
-    public void setPubSysKey(@Nullable String value) {
+    public void setPubSysKey(String value) {
         if (value != null)
-            attr(PubSysKey, value);
-    }
-
-    /**
-     Sets the raw XML internal subset for serialization.
-     @param value the internal subset contents
-     */
-    public void setInternalSubset(String value) {
-        attributes().put(InternalSubsetKey, value);
+            attr(PUB_SYS_KEY, value);
     }
 
     private void updatePubSyskey() {
-        if (has(PublicId)) {
-            attributes().add(PubSysKey, PUBLIC_KEY);
-        } else if (has(SystemId))
-            attributes().add(PubSysKey, SYSTEM_KEY);
+        if (has(PUBLIC_ID)) {
+            attr(PUB_SYS_KEY, PUBLIC_KEY);
+        } else if (has(SYSTEM_ID))
+            attr(PUB_SYS_KEY, SYSTEM_KEY);
     }
 
     /**
@@ -62,7 +52,7 @@ public class DocumentType extends LeafNode {
      * @return doctype name
      */
     public String name() {
-        return attr(NameKey);
+        return attr(NAME);
     }
 
     /**
@@ -70,7 +60,7 @@ public class DocumentType extends LeafNode {
      * @return doctype Public ID
      */
     public String publicId() {
-        return attr(PublicId);
+        return attr(PUBLIC_ID);
     }
 
     /**
@@ -78,7 +68,7 @@ public class DocumentType extends LeafNode {
      * @return doctype System ID
      */
     public String systemId() {
-        return attr(SystemId);
+        return attr(SYSTEM_ID);
     }
 
     @Override
@@ -87,31 +77,31 @@ public class DocumentType extends LeafNode {
     }
 
     @Override
-    void outerHtmlHead(QuietAppendable accum, Document.OutputSettings out) {
-        if (out.syntax() == Syntax.html && !has(PublicId) && !has(SystemId)) {
+    void outerHtmlHead(Appendable accum, int depth, Document.OutputSettings out) throws IOException {
+        // add a newline if the doctype has a preceding node (which must be a comment)
+        if (siblingIndex > 0 && out.prettyPrint())
+            accum.append('\n');
+
+        if (out.syntax() == Syntax.html && !has(PUBLIC_ID) && !has(SYSTEM_ID)) {
             // looks like a html5 doctype, go lowercase for aesthetics
             accum.append("<!doctype");
         } else {
             accum.append("<!DOCTYPE");
         }
-        if (has(NameKey))
-            accum.append(" ").append(attr(NameKey));
-        if (has(PubSysKey))
-            accum.append(" ").append(attr(PubSysKey));
-        if (has(PublicId))
-            accum.append(" \"").append(attr(PublicId)).append('"');
-        if (has(SystemId)) {
-            String systemId = attr(SystemId);
-            // system IDs can contain quotes; keep the value unchanged and use the other delimiter
-            // https://www.w3.org/TR/xml/#sec-external-ent
-            char quote = systemId.indexOf('"') >= 0 ? '\'' : '"';
-            accum.append(' ').append(quote).append(systemId).append(quote);
-        }
-        if (attributes().hasKey(InternalSubsetKey)) // only if via the xml parser; html parser will drop
-            accum.append(" [").append(attr(InternalSubsetKey)).append(']');
+        if (has(NAME))
+            accum.append(" ").append(attr(NAME));
+        if (has(PUB_SYS_KEY))
+            accum.append(" ").append(attr(PUB_SYS_KEY));
+        if (has(PUBLIC_ID))
+            accum.append(" \"").append(attr(PUBLIC_ID)).append('"');
+        if (has(SYSTEM_ID))
+            accum.append(" \"").append(attr(SYSTEM_ID)).append('"');
         accum.append('>');
     }
 
+    @Override
+    void outerHtmlTail(Appendable accum, int depth, Document.OutputSettings out) {
+    }
 
     private boolean has(final String attribute) {
         return !StringUtil.isBlank(attr(attribute));

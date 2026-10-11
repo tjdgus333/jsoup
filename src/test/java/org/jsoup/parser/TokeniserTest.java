@@ -1,81 +1,17 @@
 package org.jsoup.parser;
 
 import org.jsoup.Jsoup;
-import org.jsoup.internal.StringUtil;
 import org.jsoup.nodes.*;
 import org.jsoup.select.Elements;
 import org.junit.jupiter.api.Test;
 
-import java.io.StringReader;
 import java.nio.charset.Charset;
 import java.util.Arrays;
 
-import static org.jsoup.parser.CharacterReader.BufferSize;
+import static org.jsoup.parser.CharacterReader.maxBufferLen;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class TokeniserTest {
-    @Test void accumulatesWhitespaceReferencesBeforeText() {
-        String input = " &#32;&Tab;&amp;X";
-        HtmlTreeBuilder tree = new HtmlTreeBuilder();
-        tree.initialiseParse(new StringReader(input), "", Parser.htmlParser());
-        try {
-            Token whitespace = tree.tokeniser.readWhitespace();
-            assertEquals("  \t", whitespace.asCharacter().getData());
-            assertEquals(0, whitespace.startPos());
-            assertEquals(input.indexOf("&amp;"), whitespace.endPos());
-            whitespace.reset();
-
-            Token text = tree.tokeniser.readWhitespace();
-            assertEquals("&X", text.asCharacter().getData());
-            assertEquals(input.indexOf("&amp;"), text.startPos());
-            assertEquals(input.length(), text.endPos());
-            text.reset();
-            assertTrue(tree.tokeniser.read().isEOF());
-        } finally {
-            tree.closeParse();
-        }
-    }
-
-    @Test void whitespaceReferencePeekCrossesBufferBoundary() {
-        String spaces = StringUtil.padding(BufferSize - 2, BufferSize - 2);
-        String input = spaces + "&#32;&amp;X";
-        HtmlTreeBuilder tree = new HtmlTreeBuilder();
-        tree.initialiseParse(new StringReader(input), "", Parser.htmlParser());
-        try {
-            Token whitespace = tree.tokeniser.readWhitespace();
-            assertEquals(spaces + " ", whitespace.asCharacter().getData());
-            assertEquals(input.indexOf("&amp;"), whitespace.endPos());
-            whitespace.reset();
-
-            Token text = tree.tokeniser.readWhitespace();
-            assertEquals("&X", text.asCharacter().getData());
-            assertEquals(input.indexOf("&amp;"), text.startPos());
-            text.reset();
-        } finally {
-            tree.closeParse();
-        }
-    }
-
-    @Test void whitespaceReferencePeekDoesNotDuplicateErrors() {
-        for (String ref : new String[]{"&bogus;", "&notit;", "&#x80;", "&#;"}) {
-            Parser normal = Parser.htmlParser();
-            normal.setTrackErrors(10);
-            normal.parseInput("<!doctype html><body>" + ref + "X", "");
-            long expected = normal.getErrors().stream()
-                .filter(error -> error.getErrorMessage().startsWith("Invalid character reference"))
-                .count();
-            assertTrue(expected > 0, ref);
-
-            Parser parser = Parser.htmlParser();
-            parser.setTrackErrors(10);
-            parser.parseInput("<!doctype html><head> " + ref + "X", "");
-            long errors = parser.getErrors().stream()
-                .filter(error -> error.getErrorMessage().startsWith("Invalid character reference"))
-                .count();
-            assertEquals(expected, errors, ref);
-        }
-    }
-
     @Test
     public void bufferUpInAttributeVal() {
         // https://github.com/jhy/jsoup/issues/967
@@ -87,7 +23,7 @@ public class TokeniserTest {
             String tail = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
             StringBuilder sb = new StringBuilder(preamble);
 
-            final int charsToFillBuffer = BufferSize - preamble.length();
+            final int charsToFillBuffer = maxBufferLen - preamble.length();
             for (int i = 0; i < charsToFillBuffer; i++) {
                 sb.append('a');
             }
@@ -107,10 +43,10 @@ public class TokeniserTest {
     @Test public void handleSuperLargeTagNames() {
         // unlikely, but valid. so who knows.
 
-        StringBuilder sb = new StringBuilder(BufferSize);
+        StringBuilder sb = new StringBuilder(maxBufferLen);
         do {
             sb.append("LargeTagName");
-        } while (sb.length() < BufferSize);
+        } while (sb.length() < maxBufferLen);
         String tag = sb.toString();
         String html = "<" + tag + ">One</" + tag + ">";
 
@@ -124,10 +60,10 @@ public class TokeniserTest {
     }
 
     @Test public void handleSuperLargeAttributeName() {
-        StringBuilder sb = new StringBuilder(BufferSize);
+        StringBuilder sb = new StringBuilder(maxBufferLen);
         do {
             sb.append("LargAttributeName");
-        } while (sb.length() < BufferSize);
+        } while (sb.length() < maxBufferLen);
         String attrName = sb.toString();
         String html = "<p " + attrName + "=foo>One</p>";
 
@@ -143,10 +79,10 @@ public class TokeniserTest {
     }
 
     @Test public void handleLargeText() {
-        StringBuilder sb = new StringBuilder(BufferSize);
+        StringBuilder sb = new StringBuilder(maxBufferLen);
         do {
             sb.append("A Large Amount of Text");
-        } while (sb.length() < BufferSize);
+        } while (sb.length() < maxBufferLen);
         String text = sb.toString();
         String html = "<p>" + text + "</p>";
 
@@ -160,10 +96,10 @@ public class TokeniserTest {
     }
 
     @Test public void handleLargeComment() {
-        StringBuilder sb = new StringBuilder(BufferSize);
+        StringBuilder sb = new StringBuilder(maxBufferLen);
         do {
             sb.append("Quite a comment ");
-        } while (sb.length() < BufferSize);
+        } while (sb.length() < maxBufferLen);
         String comment = sb.toString();
         String html = "<p><!-- " + comment + " --></p>";
 
@@ -178,25 +114,29 @@ public class TokeniserTest {
     }
 
     @Test public void handleLargeCdata() {
-        StringBuilder sb = new StringBuilder(BufferSize);
+        StringBuilder sb = new StringBuilder(maxBufferLen);
         do {
             sb.append("Quite a lot of CDATA <><><><>");
-        } while (sb.length() < BufferSize);
+        } while (sb.length() < maxBufferLen);
         String cdata = sb.toString();
-        String xml = "<p><![CDATA[" + cdata + "]]></p>";
+        String html = "<p><![CDATA[" + cdata + "]]></p>";
 
-        Document doc = Jsoup.parse(xml, "", Parser.xmlParser());
-        Element el = doc.expectFirst("p");
-        CDataNode child = assertInstanceOf(CDataNode.class, el.childNode(0));
+        Document doc = Jsoup.parse(html);
+        Elements els = doc.select("p");
+        assertEquals(1, els.size());
+        Element el = els.first();
+
+        assertNotNull(el);
+        TextNode child = (TextNode) el.childNode(0);
         assertEquals(cdata, el.text());
         assertEquals(cdata, child.getWholeText());
     }
 
     @Test public void handleLargeTitle() {
-        StringBuilder sb = new StringBuilder(BufferSize);
+        StringBuilder sb = new StringBuilder(maxBufferLen);
         do {
             sb.append("Quite a long title");
-        } while (sb.length() < BufferSize);
+        } while (sb.length() < maxBufferLen);
         String title = sb.toString();
         String html = "<title>" + title + "</title>";
 
@@ -238,10 +178,10 @@ public class TokeniserTest {
     }
 
     @Test public void canParseVeryLongBogusComment() {
-        StringBuilder commentData = new StringBuilder(BufferSize);
+        StringBuilder commentData = new StringBuilder(maxBufferLen);
         do {
             commentData.append("blah blah blah blah ");
-        } while (commentData.length() < BufferSize);
+        } while (commentData.length() < maxBufferLen);
         String expectedCommentData = commentData.toString();
         String testMarkup = "<html><body><!" + expectedCommentData + "></body></html>";
         Parser parser = new Parser(new HtmlTreeBuilder());
@@ -256,39 +196,17 @@ public class TokeniserTest {
     @Test public void canParseCdataEndingAtEdgeOfBuffer() {
         String cdataStart = "<![CDATA[";
         String cdataEnd = "]]>";
-        int bufLen = BufferSize - cdataStart.length() - 1;    // also breaks with -2, but not with -3 or 0
+        int bufLen = maxBufferLen - cdataStart.length() - 1;    // also breaks with -2, but not with -3 or 0
         char[] cdataContentsArray = new char[bufLen];
         Arrays.fill(cdataContentsArray, 'x');
         String cdataContents = new String(cdataContentsArray);
         String testMarkup = cdataStart + cdataContents + cdataEnd;
-        Parser parser = Parser.xmlParser();
+        Parser parser = new Parser(new HtmlTreeBuilder());
 
         Document doc = parser.parseInput(testMarkup, "");
 
-        CDataNode cdataNode = assertInstanceOf(CDataNode.class, doc.childNode(0));
-        assertEquals(cdataContents, cdataNode.text());
-    }
-
-    @Test void tokenDataToString() {
-        TokenData data = new TokenData();
-        assertEquals("", data.toString());
-        data.set("abc");
-        assertEquals("abc", data.toString());
-        data.append("def");
-        assertEquals("abcdef", data.toString());
-    }
-
-    @Test void tokenDataValueLifecycle() {
-        TokenData data = new TokenData();
-        data.set("abc");
-        data.append("def");
-        assertEquals("abcdef", data.value());
-        assertEquals("abcdef", data.value());
-
-        data.append('g');
-        assertEquals("abcdefg", data.value());
-
-        data.reset();
-        assertEquals("", data.value());
+        Node cdataNode = doc.body().childNode(0);
+        assertTrue(cdataNode instanceof CDataNode, "Expected CDATA node");
+        assertEquals(cdataContents, ((CDataNode)cdataNode).text());
     }
 }

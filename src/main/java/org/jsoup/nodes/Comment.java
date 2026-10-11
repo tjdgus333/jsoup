@@ -1,10 +1,10 @@
 package org.jsoup.nodes;
 
-import org.jsoup.internal.QuietAppendable;
+import org.jsoup.parser.ParseSettings;
 import org.jsoup.parser.Parser;
-import org.jspecify.annotations.Nullable;
 
-import java.util.List;
+import javax.annotation.Nullable;
+import java.io.IOException;
 
 /**
  A comment node.
@@ -16,10 +16,10 @@ public class Comment extends LeafNode {
      @param data The contents of the comment
      */
     public Comment(String data) {
-        super(data);
+        value = data;
     }
 
-    @Override public String nodeName() {
+    public String nodeName() {
         return "#comment";
     }
 
@@ -37,11 +37,21 @@ public class Comment extends LeafNode {
     }
 
     @Override
-    void outerHtmlHead(QuietAppendable accum, Document.OutputSettings out) {
+	void outerHtmlHead(Appendable accum, int depth, Document.OutputSettings out) throws IOException {
+        if (out.prettyPrint() && ((isEffectivelyFirst() && parentNode instanceof Element && ((Element) parentNode).tag().formatAsBlock()) || (out.outline() )))
+            indent(accum, depth, out);
         accum
-            .append("<!--")
-            .append(getData())
-            .append("-->");
+                .append("<!--")
+                .append(getData())
+                .append("-->");
+    }
+
+    @Override
+    void outerHtmlTail(Appendable accum, int depth, Document.OutputSettings out) {}
+
+    @Override
+    public String toString() {
+        return outerHtml();
     }
 
     @Override
@@ -50,11 +60,8 @@ public class Comment extends LeafNode {
     }
 
     /**
-     * Check if this comment looks like an XML Declaration. This is the case when the HTML parser sees an XML
-     * declaration or processing instruction. Other than doctypes, those aren't part of HTML, and will be parsed as a
-     * bogus comment.
+     * Check if this comment looks like an XML Declaration.
      * @return true if it looks like, maybe, it's an XML Declaration.
-     * @see #asXmlDeclaration()
      */
     public boolean isXmlDeclaration() {
         String data = getData();
@@ -68,14 +75,24 @@ public class Comment extends LeafNode {
     /**
      * Attempt to cast this comment to an XML Declaration node.
      * @return an XML declaration if it could be parsed as one, null otherwise.
-     * @see #isXmlDeclaration()
      */
     public @Nullable XmlDeclaration asXmlDeclaration() {
-        String fragment = "<" + getData() + ">";
-        Parser parser = Parser.xmlParser();
-        List<Node> nodes = parser.parseFragmentInput(fragment, null, "");
-        if (!nodes.isEmpty() && nodes.get(0) instanceof XmlDeclaration)
-            return (XmlDeclaration) nodes.get(0);
-        return null;
+        String data = getData();
+
+        XmlDeclaration decl = null;
+        String declContent = data.substring(1, data.length() - 1);
+        // make sure this bogus comment is not immediately followed by another, treat as comment if so
+        if (isXmlDeclarationData(declContent))
+            return null;
+
+        String fragment = "<" + declContent + ">";
+        // use the HTML parser not XML, so we don't get into a recursive XML Declaration on contrived data
+        Document doc = Parser.htmlParser().settings(ParseSettings.preserveCase).parseInput(fragment, baseUri());
+        if (doc.body().childrenSize() > 0) {
+            Element el = doc.body().child(0);
+            decl = new XmlDeclaration(NodeUtils.parser(doc).settings().normalizeTag(el.tagName()), data.startsWith("!"));
+            decl.attributes().addAll(el.attributes());
+        }
+        return decl;
     }
 }

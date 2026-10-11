@@ -1,52 +1,56 @@
 package org.jsoup.nodes;
 
-import org.jsoup.internal.QuietAppendable;
+import org.jsoup.SerializationException;
 import org.jsoup.internal.StringUtil;
+import org.jsoup.helper.Validate;
 
+import java.io.IOException;
 
 /**
- * An XML declaration, such as {@code <?xml version="1.0"?>}, or a markup declaration, such as {@code <!ELEMENT ...>}.
- * Use {@link ProcessingInstruction} for other {@code <?target data?>} nodes.
- * Declaration values are available through {@link #attributes()} and {@link #attr(String)}.
+ * An XML Declaration.
  */
 public class XmlDeclaration extends LeafNode {
-
-    /** Whether this is a markup declaration. */
-    private final boolean isMarkupDeclaration;
+    // todo this impl isn't really right, the data shouldn't be attributes, just a run of text after the name
+    private final boolean isProcessingInstruction; // <! if true, <? if false, declaration (and last data char should be ?)
 
     /**
-     * Creates an XML declaration or markup declaration.
-     * @param name the declaration name, such as {@code xml} or {@code ELEMENT}
-     * @param isMarkupDeclaration {@code true} to create {@code <!name ...>}; {@code false} to create {@code <?name ...?>}
+     * Create a new XML declaration
+     * @param name of declaration
+     * @param isProcessingInstruction is processing instruction
      */
-    public XmlDeclaration(String name, boolean isMarkupDeclaration) {
-        super(name);
-        this.isMarkupDeclaration = isMarkupDeclaration;
+    public XmlDeclaration(String name, boolean isProcessingInstruction) {
+        Validate.notNull(name);
+        value = name;
+        this.isProcessingInstruction = isProcessingInstruction;
     }
 
-    @Override public String nodeName() {
+    public String nodeName() {
         return "#declaration";
     }
 
     /**
-     * Gets the declaration name.
-     * @return the declaration name
+     * Get the name of this declaration.
+     * @return name of this declaration.
      */
     public String name() {
         return coreValue();
     }
 
     /**
-     * Gets the declaration data, without its name or delimiters.
-     * @return the declaration data
+     * Get the unencoded XML declaration.
+     * @return XML declaration
      */
     public String getWholeDeclaration() {
         StringBuilder sb = StringUtil.borrowBuilder();
-        getWholeDeclaration(QuietAppendable.wrap(sb), new Document.OutputSettings());
+        try {
+            getWholeDeclaration(sb, new Document.OutputSettings());
+        } catch (IOException e) {
+            throw new SerializationException(e);
+        }
         return StringUtil.releaseBuilder(sb).trim();
     }
 
-    private void getWholeDeclaration(QuietAppendable accum, Document.OutputSettings out) {
+    private void getWholeDeclaration(Appendable accum, Document.OutputSettings out) throws IOException {
         for (Attribute attribute : attributes()) {
             String key = attribute.getKey();
             String val = attribute.getValue();
@@ -56,7 +60,7 @@ public class XmlDeclaration extends LeafNode {
                 accum.append(key);
                 if (!val.isEmpty()) {
                     accum.append("=\"");
-                    Entities.escape(accum, val, out, Entities.ForAttribute);
+                    Entities.escape(accum, val, out, true, false, false, false);
                     accum.append('"');
                 }
             }
@@ -64,19 +68,19 @@ public class XmlDeclaration extends LeafNode {
     }
 
     @Override
-    void outerHtmlHead(QuietAppendable accum, Document.OutputSettings out) {
+    void outerHtmlHead(Appendable accum, int depth, Document.OutputSettings out) throws IOException {
         accum
             .append("<")
-            .append(isMarkupDeclaration ? "!" : "?")
+            .append(isProcessingInstruction ? "!" : "?")
             .append(coreValue());
         getWholeDeclaration(accum, out);
         accum
-            .append(isMarkupDeclaration ? "" : "?")
+            .append(isProcessingInstruction ? "!" : "?")
             .append(">");
     }
 
     @Override
-    void outerHtmlTail(QuietAppendable accum, Document.OutputSettings out) {
+    void outerHtmlTail(Appendable accum, int depth, Document.OutputSettings out) {
     }
 
     @Override

@@ -2,7 +2,6 @@ package org.jsoup.integration;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
 import org.jsoup.parser.Parser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -17,13 +16,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  Tests fixes for issues raised by the OSS Fuzz project @ https://oss-fuzz.com/testcases?project=jsoup. Contains inline
- string cases causing exceptions. Timeout tests are in ParserSoakIT.
+ string cases causing exceptions. Timeout tests are in FuzzFixesIT.
  */
 public class FuzzFixesTest {
-    private static final File testDir = ParseTest.getFile("/fuzztests/");
 
     private static Stream<File> testFiles() {
-        File[] files = testDir.listFiles();
+        File[] files = FuzzFixesIT.testDir.listFiles();
         assertNotNull(files);
         assertTrue(files.length > 10);
 
@@ -49,24 +47,10 @@ public class FuzzFixesTest {
         assertNotNull(xmlDoc);
     }
 
-    @Test void fragment() {
-        Parser.htmlParser().parseFragmentInput("<frameset>>l\u0000<\u0000<ditl>\u0000< \\", new Element("colgroup"), "");
-    }
-
     @ParameterizedTest
     @MethodSource("testFiles")
     void testHtmlParse(File file) throws IOException {
         Document doc = Jsoup.parse(file, "UTF-8", "https://example.com/");
-        assertNotNull(doc);
-        doc = Jsoup.parse(file, "UTF-8", ""); // no base href attr; so same as a parse(string), which can have subtly different semantics
-        assertNotNull(doc);
-    }
-
-    @ParameterizedTest
-    @MethodSource("testFiles")
-    void testHtmlFragmentParse(File file) throws IOException {
-        String html = ParseTest.getFileAsString(file);
-        Document doc = Jsoup.parseBodyFragment(html);
         assertNotNull(doc);
     }
 
@@ -75,6 +59,5 @@ public class FuzzFixesTest {
     void testXmlParse(File file) throws IOException {
         Document doc = Jsoup.parse(file, "UTF-8", "https://example.com/", Parser.xmlParser());
         assertNotNull(doc);
-        doc = Jsoup.parse(file, "UTF-8", "", Parser.xmlParser()); // no base href attr
     }
 }

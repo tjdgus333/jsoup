@@ -6,8 +6,6 @@ package org.jsoup.safety;
  */
 
 import org.jsoup.helper.Validate;
-import org.jsoup.internal.Normalizer;
-import org.jsoup.internal.StringUtil;
 import org.jsoup.nodes.Attribute;
 import org.jsoup.nodes.Attributes;
 import org.jsoup.nodes.Element;
@@ -16,14 +14,13 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 
 import static org.jsoup.internal.Normalizer.lowerCase;
 
 
 /**
- Safelists define what HTML (elements and attributes) to allow through a {@link Cleaner}. Everything else is removed.
+ Safe-lists define what HTML (elements and attributes) to allow through the cleaner. Everything else is removed.
  <p>
  Start with one of the defaults:
  </p>
@@ -54,25 +51,20 @@ import static org.jsoup.internal.Normalizer.lowerCase;
  </ul>
 
  <p>
- The {@link Cleaner} and these safelists assume that you want to clean a <code>body</code> fragment of HTML (to add user
- supplied HTML into a templated page), and not to clean a full HTML document. If the latter is the case, you could wrap
- the templated document HTML around the cleaned body HTML.
- </p>
- <p>
- Safelists are mutable. A {@link Cleaner} uses the supplied safelist directly, so later changes affect later cleaning
- calls. If you want to share a safelist across threads, finish configuring it first and do not mutate it while it is in
- use. To build a variant from an existing configuration, use {@link #Safelist(Safelist)} to make a copy.
+ The cleaner and these safelists assume that you want to clean a <code>body</code> fragment of HTML (to add user
+ supplied HTML into a templated page), and not to clean a full HTML document. If the latter is the case, either wrap the
+ document HTML around the cleaned body HTML, or create a safelist that allows <code>html</code> and <code>head</code>
+ elements as appropriate.
  </p>
  <p>
  If you are going to extend a safelist, please be very careful. Make sure you understand what attributes may lead to
  XSS attack vectors. URL attributes are particularly vulnerable and require careful validation. See 
  the <a href="https://owasp.org/www-community/xss-filter-evasion-cheatsheet">XSS Filter Evasion Cheat Sheet</a> for some
- XSS attack examples (that jsoup will safeguard against with the default Cleaner and Safelist configuration).
+ XSS attack examples (that jsoup will safegaurd against the default Cleaner and Safelist configuration).
  </p>
  */
 public class Safelist {
     private static final String All = ":all";
-    private static final TagName AllTag = TagName.valueOf(All);
     private final Set<TagName> tagNames; // tags allowed, lower case. e.g. [p, br, span]
     private final Map<TagName, Set<AttributeKey>> attributes; // tag -> attribute[]. allowed attributes [href] for a tag.
     private final Map<TagName, Map<AttributeKey, AttributeValue>> enforcedAttributes; // always set these attribute values
@@ -123,7 +115,7 @@ public class Safelist {
      </p>
      <p>
      Links (<code>a</code> elements) can point to <code>http, https, ftp, mailto</code>, and have an enforced
-     <code>rel=nofollow</code> attribute if they link offsite (as indicated by the specified base URI).
+     <code>rel=nofollow</code> attribute.
      </p>
      <p>
      Does not allow images.
@@ -146,7 +138,7 @@ public class Safelist {
                 .addProtocols("blockquote", "cite", "http", "https")
                 .addProtocols("cite", "cite", "http", "https")
 
-                .addEnforcedAttribute("a", "rel", "nofollow") // has special handling for external links, in Cleaner
+                .addEnforcedAttribute("a", "rel", "nofollow")
                 ;
 
     }
@@ -256,7 +248,7 @@ public class Safelist {
 
         for (String tagName : tags) {
             Validate.notEmpty(tagName);
-            Validate.isFalse(Normalizer.equalsIgnoreAsciiCase(tagName, "noscript"),
+            Validate.isFalse(tagName.equalsIgnoreCase("noscript"),
                 "noscript is unsupported in Safelists, due to incompatibilities between parsers with and without script-mode enabled");
             tagNames.add(TagName.valueOf(tagName));
         }
@@ -305,15 +297,19 @@ public class Safelist {
         Validate.notNull(attributes);
         Validate.isTrue(attributes.length > 0, "No attribute names supplied.");
 
-        addTags(tag);
         TagName tagName = TagName.valueOf(tag);
+        tagNames.add(tagName);
         Set<AttributeKey> attributeSet = new HashSet<>();
         for (String key : attributes) {
             Validate.notEmpty(key);
             attributeSet.add(AttributeKey.valueOf(key));
         }
-        Set<AttributeKey> currentSet = this.attributes.computeIfAbsent(tagName, k -> new HashSet<>());
-        currentSet.addAll(attributeSet);
+        if (this.attributes.containsKey(tagName)) {
+            Set<AttributeKey> currentSet = this.attributes.get(tagName);
+            currentSet.addAll(attributeSet);
+        } else {
+            this.attributes.put(tagName, attributeSet);
+        }
         return this;
     }
 
@@ -386,8 +382,13 @@ public class Safelist {
         AttributeKey attrKey = AttributeKey.valueOf(attribute);
         AttributeValue attrVal = AttributeValue.valueOf(value);
 
-        Map<AttributeKey, AttributeValue> attrMap = enforcedAttributes.computeIfAbsent(tagName, k -> new HashMap<>());
-        attrMap.put(attrKey, attrVal);
+        if (enforcedAttributes.containsKey(tagName)) {
+            enforcedAttributes.get(tagName).put(attrKey, attrVal);
+        } else {
+            Map<AttributeKey, AttributeValue> attrMap = new HashMap<>();
+            attrMap.put(attrKey, attrVal);
+            enforcedAttributes.put(tagName, attrMap);
+        }
         return this;
     }
 
@@ -418,6 +419,12 @@ public class Safelist {
      * Configure this Safelist to preserve relative links in an element's URL attribute, or convert them to absolute
      * links. By default, this is <b>false</b>: URLs will be  made absolute (e.g. start with an allowed protocol, like
      * e.g. {@code http://}.
+     * <p>
+     * Note that when handling relative links, the input document must have an appropriate {@code base URI} set when
+     * parsing, so that the link's protocol can be confirmed. Regardless of the setting of the {@code preserve relative
+     * links} option, the link must be resolvable against the base URI to an allowed protocol; otherwise the attribute
+     * will be removed.
+     * </p>
      *
      * @param preserve {@code true} to allow relative links, {@code false} (default) to deny
      * @return this Safelist, for chaining.
@@ -426,14 +433,6 @@ public class Safelist {
     public Safelist preserveRelativeLinks(boolean preserve) {
         preserveRelativeLinks = preserve;
         return this;
-    }
-
-    /**
-     * Get the current setting for preserving relative links.
-     * @return {@code true} if relative links are preserved, {@code false} if they are converted to absolute.
-     */
-    public boolean preserveRelativeLinks() {
-        return preserveRelativeLinks;
     }
 
     /**
@@ -459,9 +458,21 @@ public class Safelist {
 
         TagName tagName = TagName.valueOf(tag);
         AttributeKey attrKey = AttributeKey.valueOf(attribute);
-        Map<AttributeKey, Set<Protocol>> attrMap = this.protocols.computeIfAbsent(tagName, k -> new HashMap<>());
-        Set<Protocol> protSet = attrMap.computeIfAbsent(attrKey, k -> new HashSet<>());
+        Map<AttributeKey, Set<Protocol>> attrMap;
+        Set<Protocol> protSet;
 
+        if (this.protocols.containsKey(tagName)) {
+            attrMap = this.protocols.get(tagName);
+        } else {
+            attrMap = new HashMap<>();
+            this.protocols.put(tagName, attrMap);
+        }
+        if (attrMap.containsKey(attrKey)) {
+            protSet = attrMap.get(attrKey);
+        } else {
+            protSet = new HashSet<>();
+            attrMap.put(attrKey, protSet);
+        }
         for (String protocol : protocols) {
             Validate.notEmpty(protocol);
             Protocol prot = Protocol.valueOf(protocol);
@@ -521,7 +532,6 @@ public class Safelist {
 
     /**
      * Test if the supplied attribute is allowed by this safelist for this tag.
-     * <p>This method does not modify the input element or attribute.</p>
      * @param tagName tag to consider allowing the attribute in
      * @param el element under test, to confirm protocol
      * @param attr attribute under test
@@ -536,29 +546,33 @@ public class Safelist {
             if (protocols.containsKey(tag)) {
                 Map<AttributeKey, Set<Protocol>> attrProts = protocols.get(tag);
                 // ok if not defined protocol; otherwise test
-                return !attrProts.containsKey(key) || isSafeProtocol(getProtocolValue(el, attr), attrProts.get(key));
+                return !attrProts.containsKey(key) || testValidProtocol(el, attr, attrProts.get(key));
             } else { // attribute found, no protocols defined, so OK
                 return true;
             }
         }
+        // might be an enforced attribute?
         Map<AttributeKey, AttributeValue> enforcedSet = enforcedAttributes.get(tag);
-        if (enforcedSet != null && enforcedSet.containsKey(key)) {
-            // enforced attr key was LCed via AttributeKey.valueOf(attr.getKey()),
-            // if the input already has that exact value, treat it as safe
-            return enforcedSet.get(key).equals(AttributeValue.valueOf(attr.getValue()));
+        if (enforcedSet != null) {
+            Attributes expect = getEnforcedAttributes(tagName);
+            String attrKey = attr.getKey();
+            if (expect.hasKeyIgnoreCase(attrKey)) {
+                return expect.getIgnoreCase(attrKey).equals(attr.getValue());
+            }
         }
         // no attributes defined for tag, try :all tag
         return !tagName.equals(All) && isSafeAttribute(All, el, attr);
     }
 
-    private String getProtocolValue(Element el, Attribute attr) {
+    private boolean testValidProtocol(Element el, Attribute attr, Set<Protocol> protocols) {
+        // try to resolve relative urls to abs, and optionally update the attribute so output html has abs.
+        // rels without a baseuri get removed
         String value = el.absUrl(attr.getKey());
-        if (value.isEmpty() && !StringUtil.hasHttpScheme(attr.getValue()))
+        if (value.length() == 0)
             value = attr.getValue(); // if it could not be made abs, run as-is to allow custom unknown protocols
-        return value;
-    }
-
-    private boolean isSafeProtocol(String value, Set<Protocol> protocols) {
+        if (!preserveRelativeLinks)
+            attr.setValue(value);
+        
         for (Protocol protocol : protocols) {
             String prot = protocol.toString();
 
@@ -570,40 +584,16 @@ public class Safelist {
                 }
             }
 
-            String lc = lowerCase(value);
-            if (lc.startsWith(prot)
-                && lc.length() > prot.length()
-                && lc.charAt(prot.length()) == ':') {
+            prot += ":";
+
+            if (lowerCase(value).startsWith(prot)) {
                 return true;
             }
         }
         return false;
     }
 
-    /**
-     Check if a URL attribute should be normalized to an absolute URL in the cleaned output. Uses the configured
-     protocols for that tag+attribute pair, falling back to {@code :all} only if the tag does not define the
-     attribute.
-     */
-    boolean shouldAbsUrl(String tagName, String attrKey) {
-        if (preserveRelativeLinks) return false;
-        return shouldAbsUrl(TagName.valueOf(tagName), AttributeKey.valueOf(attrKey));
-    }
-
-    private boolean shouldAbsUrl(TagName tag, AttributeKey key) {
-        Set<AttributeKey> allowedAttrs = attributes.get(tag);
-        if (allowedAttrs != null && allowedAttrs.contains(key)) {
-            Map<AttributeKey, Set<Protocol>> protocolsByAttr = protocols.get(tag);
-            return protocolsByAttr != null && protocolsByAttr.containsKey(key);
-        }
-
-        Map<AttributeKey, AttributeValue> enforcedAttrs = enforcedAttributes.get(tag);
-        if (enforcedAttrs != null && enforcedAttrs.containsKey(key)) return false;
-
-        return !tag.equals(AllTag) && shouldAbsUrl(AllTag, key);
-    }
-
-    private static boolean isValidAnchor(String value) {
+    private boolean isValidAnchor(String value) {
         return value.startsWith("#") && !value.matches(".*\\s.*");
     }
 
@@ -632,7 +622,7 @@ public class Safelist {
         }
 
         static TagName valueOf(String value) {
-            return new TagName(Normalizer.asciiLowerCase(value));
+            return new TagName(value);
         }
     }
 
@@ -642,7 +632,7 @@ public class Safelist {
         }
 
         static AttributeKey valueOf(String value) {
-            return new AttributeKey(Normalizer.asciiLowerCase(value));
+            return new AttributeKey(value);
         }
     }
 
@@ -676,15 +666,21 @@ public class Safelist {
 
         @Override
         public int hashCode() {
-            return value.hashCode();
+            final int prime = 31;
+            int result = 1;
+            result = prime * result + ((value == null) ? 0 : value.hashCode());
+            return result;
         }
 
         @Override
         public boolean equals(Object obj) {
             if (this == obj) return true;
-            if (obj == null || getClass() != obj.getClass()) return false;
+            if (obj == null) return false;
+            if (getClass() != obj.getClass()) return false;
             TypedValue other = (TypedValue) obj;
-            return Objects.equals(value, other.value);
+            if (value == null) {
+                return other.value == null;
+            } else return value.equals(other.value);
         }
 
         @Override

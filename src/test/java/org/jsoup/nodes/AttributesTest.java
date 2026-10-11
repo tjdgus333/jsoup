@@ -1,14 +1,12 @@
 package org.jsoup.nodes;
 
 import org.jsoup.Jsoup;
-import org.jsoup.parser.Parser;
 import org.junit.jupiter.api.Test;
 
 import java.util.ConcurrentModificationException;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -43,15 +41,6 @@ public class AttributesTest {
 
         assertEquals(" Tot=\"a&amp;p\" Hello=\"There\" data-name=\"Jsoup\"", a.html());
         assertEquals(a.html(), a.toString());
-    }
-
-    @Test void makesRepairedHtmlAttributeNameUnique() {
-        // valid names are preserved and repaired collisions receive an underscore prefix
-        Attributes attributes = new Attributes();
-        attributes.put("A=B", "one");
-        attributes.put("a_b", "two");
-
-        assertEquals(" _A_B=\"one\" a_b=\"two\"", attributes.html());
     }
 
     @Test
@@ -152,29 +141,6 @@ public class AttributesTest {
             seen++;
         }
         assertEquals(2, seen);
-    }
-
-    @Test void iteratorThrows() {
-        Attributes attrs = new Attributes();
-        attrs.put("One", "one").put("Two", "two");
-
-        Iterator<Attribute> it = attrs.iterator();
-        int seen = 0;
-        while (it.hasNext()) {
-            it.next();
-            seen++;
-        }
-        assertFalse(it.hasNext());
-        assertEquals(2, seen);
-
-        boolean threw = false;
-        try {
-            Attribute next = it.next();
-            assertNotNull(next); // not hit
-        } catch (NoSuchElementException e) {
-            threw = true;
-        }
-        assertTrue(threw);
     }
 
     @Test
@@ -307,7 +273,7 @@ public class AttributesTest {
         a.put(Attributes.internalKey("last"), "example.com");
         a.remove(Attributes.internalKey("last"));
 
-        assertEquals(2, a.size());
+        assertEquals(4, a.size());
         assertEquals(2, a.asList().size()); // excluded from lists
     }
 
@@ -316,6 +282,7 @@ public class AttributesTest {
         String html = "<a foo bar=\"\" async=async qux=qux defer=deferring ismap inert=\"\">";
         Element el = Jsoup.parse(html).selectFirst("a");
         assertEquals(" foo bar=\"\" async qux=\"qux\" defer=\"deferring\" ismap inert", el.attributes().html());
+
     }
 
     @Test public void booleanNullAttributesConsistent() {
@@ -374,57 +341,9 @@ public class AttributesTest {
         assertEquals(two, three);
         assertEquals(three, three);
         assertEquals(three, three.clone());
-        assertEquals(one.hashCode(), three.hashCode());
         assertEquals(four, four);
         assertEquals(four, four.clone());
         assertNotEquals(one, four);
-    }
-
-    @Test void equalsIgnoresInternalData() {
-        Element first = Parser.htmlParser().setTrackPosition(true)
-            .parseInput("<b id=one></b><b id=one></b>", "").select("b").first();
-        Element second = Parser.htmlParser().setTrackPosition(true)
-            .parseInput("<p><b id=one></b>", "").expectFirst("b");
-        assertNotNull(first);
-        assertNotEquals(first.sourceRange(), second.sourceRange());
-
-        Attributes one = first.attributes();
-        Attributes two = second.attributes();
-        two.userData("owner", "second");
-        assertEquals(one, two);
-        assertEquals(one.hashCode(), two.hashCode());
-        Attributes untracked = Parser.htmlParser().parseInput("<b id=one>", "").expectFirst("b").attributes();
-        assertEquals(one, untracked);
-        assertEquals(one.hashCode(), untracked.hashCode());
-
-        two.put("id", "two");
-        assertNotEquals(one, two);
-    }
-
-    @Test void hashCodeIgnoresAttributeOrder() {
-        Attributes one = new Attributes().add("a", "b").add("c", "d");
-        Attributes reordered = new Attributes().add("c", "d").add("a", "b");
-
-        assertEquals(one, reordered);
-        assertEquals(one.hashCode(), reordered.hashCode());
-    }
-
-    @Test void hashCodeDistinguishesSwappedNameAndValue() {
-        Attributes one = new Attributes().add("a", "b");
-        Attributes swapped = new Attributes().add("b", "a");
-
-        assertNotEquals(one.hashCode(), swapped.hashCode());
-    }
-
-    @Test void equalsCountsDuplicateAttributes() {
-        Attributes one = new Attributes().add("a", "1").add("a", "1").add("b", "2");
-        Attributes two = new Attributes().add("b", "2").add("a", "1").add("a", "1");
-        Attributes three = new Attributes().add("b", "2").add("a", "1").add("a", "2");
-
-        assertEquals(one, two);
-        assertEquals(one.hashCode(), two.hashCode());
-        assertNotEquals(one, three);
-        assertNotEquals(three, one);
     }
 
     @Test void cloneAttributes() {
@@ -441,62 +360,6 @@ public class AttributesTest {
         assertEquals(4, two.size());
         assertEquals(3, one.size());
         assertNotEquals(one, two);
+
     }
-
-    @Test void cloneGetsUniqueUserDataMap() {
-        Attributes one = new Attributes();
-        String data = "Hello";
-        one.userData("data", data);
-
-        Attributes two = one.clone();
-        assertSame(two.userData("data"), one.userData("data"));
-        assertNotSame(two.userData(), one.userData());
-    }
-
-    @Test void dontCloneNullUserData() {
-        // https://github.com/jhy/jsoup/issues/2356
-        Element span1 = Jsoup.parse("<span id=1></span>").expectFirst("span");
-        Attributes attrs1 = span1.attributes();
-        assertFalse(attrs1.isEmpty());
-        span1.removeAttr("id");
-        assertTrue(attrs1.isEmpty());
-
-        Element span2 = span1.clone();
-        Attributes attrs2 = span2.attributes();
-        assertTrue(attrs2.isEmpty());
-    }
-
-    @Test void sizeDoesNotIncludeInternal() {
-        Element el = new Element("el");
-        Attributes attrs = el.attributes();
-        assertEquals(0, attrs.size());
-        assertTrue(attrs.isEmpty());
-
-        attrs.userData("foo", "bar");
-        attrs.put(Attributes.internalKey("qux"), "bar");
-        assertEquals(0, attrs.size());
-        assertEquals(2, attrs.size);
-        assertTrue(attrs.isEmpty());
-
-        attrs.put("foo", "bar");
-        attrs.put("qux", "bar");
-        assertEquals(2, attrs.size());
-        assertEquals(4, attrs.size);
-
-        el.clearAttributes();
-        assertEquals(0, attrs.size());
-        assertEquals(2, attrs.size); // we keep the internals
-        assertTrue(attrs.isEmpty());
-    }
-
-
-    @Test void repairedHtmlKeysUseAsciiCollisionChecks() {
-        Attributes attrs = new Attributes();
-        attrs.add("K_", "unicode");
-        attrs.add("k\u0001", "repaired");
-        assertEquals(" K_=\"unicode\" k_=\"repaired\"", attrs.html());
-        attrs.add("K_", "original");
-        assertEquals(" K_=\"unicode\" _k_=\"repaired\" K_=\"original\"", attrs.html());
-    }
-
 }

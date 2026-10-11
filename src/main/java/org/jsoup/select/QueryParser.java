@@ -1,41 +1,27 @@
 package org.jsoup.select;
 
-import org.jsoup.helper.Regex;
 import org.jsoup.internal.StringUtil;
 import org.jsoup.helper.Validate;
-import org.jsoup.nodes.CDataNode;
-import org.jsoup.nodes.Comment;
-import org.jsoup.nodes.DataNode;
-import org.jsoup.nodes.LeafNode;
-import org.jsoup.nodes.Node;
-import org.jsoup.nodes.ProcessingInstruction;
-import org.jsoup.nodes.TextNode;
 import org.jsoup.parser.TokenQueue;
-import org.jsoup.select.HasEvaluator.Scope;
-import org.jsoup.select.HasEvaluator.Traversal;
-import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static org.jsoup.internal.Normalizer.asciiLowerCase;
-import static org.jsoup.internal.StringUtil.trimAsciiWhitespace;
 import static org.jsoup.select.StructuralEvaluator.ImmediateParentRun;
+import static org.jsoup.internal.Normalizer.normalize;
 
 /**
  * Parses a CSS selector into an Evaluator tree.
  */
-public class QueryParser implements AutoCloseable {
-    private final static char[] Combinators = {'>', '+', '~'}; // ' ' is also a combinator, but found implicitly
+public class QueryParser {
+    private final static char[] Combinators = {',', '>', '+', '~', ' '};
     private final static String[] AttributeEvals = new String[]{"=", "!=", "^=", "$=", "*=", "~="};
-    private final static char[] SequenceEnders = {',', ')'};
 
     private final TokenQueue tq;
     private final String query;
-    private boolean inNodeContext; // ::comment:contains should act on node value, vs element text
+    private final List<Evaluator> evals = new ArrayList<>();
 
     /**
      * Create a new QueryParser.
@@ -43,22 +29,20 @@ public class QueryParser implements AutoCloseable {
      */
     private QueryParser(String query) {
         Validate.notEmpty(query);
-        query = trimAsciiWhitespace(query);
+        query = query.trim();
         this.query = query;
         this.tq = new TokenQueue(query);
     }
 
     /**
-     Parse a CSS query into an Evaluator. If you are evaluating the same query repeatedly, it may be more efficient to
-     parse it once and reuse the Evaluator.
-
-     @param query CSS query
-     @return Evaluator
-     @see Selector selector query syntax
-     @throws Selector.SelectorParseException if the CSS query is invalid
+     * Parse a CSS query into an Evaluator.
+     * @param query CSS query
+     * @return Evaluator
+     * @see Selector selector query syntax
      */
     public static Evaluator parse(String query) {
-        try (QueryParser p = new QueryParser(query)) {
+        try {
+            QueryParser p = new QueryParser(query);
             return p.parse();
         } catch (IllegalArgumentException e) {
             throw new Selector.SelectorParseException(e.getMessage());
@@ -66,206 +50,132 @@ public class QueryParser implements AutoCloseable {
     }
 
     /**
-     Parse the query. We use this simplified expression of the grammar:
-     <pre>
-     SelectorGroup   ::= Selector (',' Selector)*
-     Selector        ::= [ Combinator ] SimpleSequence ( Combinator SimpleSequence )*
-     SimpleSequence  ::= [ TypeSelector ] ( ID | Class | Attribute | Pseudo )*
-     Pseudo           ::= ':' Name [ '(' SelectorGroup ')' ]
-     Combinator      ::= S+         // descendant (whitespace)
-     | '>'       // child
-     | '+'       // adjacent sibling
-     | '~'       // general sibling
-     </pre>
-
-     See <a href="https://www.w3.org/TR/selectors-4/#grammar">selectors-4</a> for the real thing
+     * Parse the query
+     * @return Evaluator
      */
     Evaluator parse() {
-        Evaluator eval = parseSelectorGroup().evaluator();
-        tq.consumeWhitespace();
-        if (!tq.isEmpty())
-            throw new Selector.SelectorParseException("Could not parse query '%s': unexpected token at '%s'", query, tq.remainder());
-        return eval;
-    }
-
-    /** Parses an ordered group of comma-separated selectors. */
-    private SelectorGroup parseSelectorGroup() {
-        List<ComplexSelector> selectors = new ArrayList<>();
-        do {
-            selectors.add(parseSelector());
-        } while (tq.matchChomp(','));
-        return new SelectorGroup(selectors);
-    }
-
-    /** Parses a selector into an evaluator and records its top-level combinators. */
-    private ComplexSelector parseSelector() {
-        // Selector ::= [ Combinator ] SimpleSequence ( Combinator SimpleSequence )*
         tq.consumeWhitespace();
 
-        Evaluator left;
-        char leading = 0;
-        int combinators = 0;
-        boolean continuesToSibling = false; // the continuation has a + or ~ combinator, so it may leave the first sibling tree
-        boolean relative = tq.matchesAny(Combinators);
-        if (relative) {
-            // e.g. query is "> div"; left side is the root element
-            left = new StructuralEvaluator.Root();
+        if (tq.matchesAny(Combinators)) { // if starts with a combinator, use root as elements
+            evals.add(new StructuralEvaluator.Root());
+            combinator(tq.consume());
         } else {
-            left = parseSimpleSequence();
+            evals.add(consumeEvaluator());
         }
-        Evaluator rightmost = left; // keep each right side before it is folded into left
 
-        while (true) {
-            char combinator = 0;
-            if (tq.consumeWhitespace())
-                combinator = ' ';            // maybe descendant?
-            if (tq.matchesAny(Combinators)) // no, explicit
-                combinator = tq.consume();
-            else if (tq.matchesAny(SequenceEnders)) // , - space after simple like "foo , bar"; ) - close of :has()
-                break;
+        while (!tq.isEmpty()) {
+            // hierarchy and extras
+            boolean seenWhite = tq.consumeWhitespace();
 
-            if (combinator != 0) {
-                if (relative && combinators == 0) leading = combinator;
-                else if (relative && (combinator == '+' || combinator == '~')) continuesToSibling = true;
-                Evaluator right = parseSimpleSequence();
-                rightmost = right;
-                left = combinator(left, combinator, right);
-                combinators++;
-            } else {
-                break;
+            if (tq.matchesAny(Combinators)) {
+                combinator(tq.consume());
+            } else if (seenWhite) {
+                combinator(' ');
+            } else { // E.class, E#id, E[attr] etc. AND
+                evals.add(consumeEvaluator()); // take next el, #. etc off queue
             }
         }
-        return new ComplexSelector(left, rightmost, leading, combinators, continuesToSibling);
+
+        if (evals.size() == 1)
+            return evals.get(0);
+
+        return new CombiningEvaluator.And(evals);
     }
 
-    /**
-     A complex selector compiled with details of its top-level combinators.
-     Nested selectors are parsed separately and do not affect these details.
-     */
-    private static final class ComplexSelector {
-        final Evaluator evaluator; // complete compiled selector
-        final Evaluator rightmost; // evaluator for the final simple sequence
-        final char leadingCombinator;
-        final int combinatorCount;
-        final boolean continuesToSibling; // the continuation has a top-level + or ~ combinator
-
-        /** Creates a complex selector from its evaluator and top-level combinator details. */
-        ComplexSelector(Evaluator evaluator, Evaluator rightmost, char leadingCombinator, int combinatorCount,
-                        boolean continuesToSibling) {
-            this.evaluator = evaluator;
-            this.rightmost = rightmost;
-            this.leadingCombinator = leadingCombinator;
-            this.combinatorCount = combinatorCount;
-            this.continuesToSibling = continuesToSibling;
-        }
-    }
-
-    /** A parsed selector group that can be compiled or rendered in source order. */
-    private static final class SelectorGroup {
-        final List<ComplexSelector> selectors;
-
-        /** Creates a group from its selectors in source order. */
-        SelectorGroup(List<ComplexSelector> selectors) {
-            this.selectors = selectors;
-        }
-
-        /** Build the selectors into a single evaluator. */
-        Evaluator evaluator() {
-            Evaluator first = selectors.get(0).evaluator;
-            if (selectors.size() == 1)
-                return first;
-
-            ArrayList<Evaluator> evaluators = new ArrayList<>(selectors.size());
-            // preserve a leading Or's flat evaluation order, e.g. the two alternatives compiled for *|tag
-            if (first instanceof CombiningEvaluator.Or)
-                evaluators.addAll(((CombiningEvaluator.Or) first).evaluators);
-            else
-                evaluators.add(first);
-            for (int i = 1; i < selectors.size(); i++)
-                evaluators.add(selectors.get(i).evaluator);
-            return new CombiningEvaluator.Or(evaluators);
-        }
-
-        @Override public String toString() {
-            StringBuilder out = new StringBuilder();
-            for (ComplexSelector selector : selectors) {
-                if (out.length() > 0) out.append(", ");
-                out.append(selector.evaluator);
-            }
-            return out.toString();
-        }
-    }
-
-    Evaluator parseSimpleSequence() {
-        // SimpleSequence ::= TypeSelector? ( Hash | Class | Pseudo )*
-        Evaluator first = null;
+    private void combinator(char combinator) {
         tq.consumeWhitespace();
+        String subQuery = consumeSubQuery(); // support multi > childs
 
-        // one optional type selector
-        if (tq.matchesWord() || tq.matches("*|"))
-            first = byTag();
-        else if (tq.matchChomp('*'))
-            first = new Evaluator.AllElements();
+        Evaluator rootEval; // the new topmost evaluator
+        Evaluator currentEval; // the evaluator the new eval will be combined to. could be root, or rightmost or.
+        Evaluator newEval = parse(subQuery); // the evaluator to add into target evaluator
+        boolean replaceRightMost = false;
 
-        // use the first subclass when there is no type selector
-        if (first == null)
-            first = parseSubclass();
+        if (evals.size() == 1) {
+            rootEval = currentEval = evals.get(0);
+            // make sure OR (,) has precedence:
+            if (rootEval instanceof CombiningEvaluator.Or && combinator != ',') {
+                currentEval = ((CombiningEvaluator.Or) currentEval).rightMostEvaluator();
+                assert currentEval != null; // rightMost signature can return null (if none set), but always will have one by this point
+                replaceRightMost = true;
+            }
+        }
+        else {
+            rootEval = currentEval = new CombiningEvaluator.And(evals);
+        }
+        evals.clear();
 
-        if (first == null)
-            throw new Selector.SelectorParseException("Could not parse query '%s': unexpected token at '%s'", query, tq.remainder());
-
-        return parseRemainingSubclasses(first);
-    }
-
-    /** Parses and combines any subclasses that follow the first evaluator. */
-    private Evaluator parseRemainingSubclasses(Evaluator first) {
-        Evaluator next = parseSubclass();
-        if (next == null)
-            return first;
-
-        ArrayList<Evaluator> evaluators = new ArrayList<>(4);
-        evaluators.add(first);
-        do {
-            evaluators.add(next);
-        } while ((next = parseSubclass()) != null);
-        return new CombiningEvaluator.And(evaluators);
-    }
-
-    static Evaluator combinator(Evaluator left, char combinator, Evaluator right) {
+        // for most combinators: change the current eval into an AND of the current eval and the new eval
         switch (combinator) {
             case '>':
-                ImmediateParentRun run = left instanceof ImmediateParentRun ?
-                    (ImmediateParentRun) left : new ImmediateParentRun(left);
-                run.add(right);
-                return run;
+                ImmediateParentRun run = currentEval instanceof ImmediateParentRun ?
+                        (ImmediateParentRun) currentEval : new ImmediateParentRun(currentEval);
+                run.add(newEval);
+                currentEval = run;
+                break;
             case ' ':
-                return new CombiningEvaluator.And(new StructuralEvaluator.Ancestor(left), right);
+                currentEval = new CombiningEvaluator.And(new StructuralEvaluator.Parent(currentEval), newEval);
+                break;
             case '+':
-                return new CombiningEvaluator.And(new StructuralEvaluator.ImmediatePreviousSibling(left), right);
+                currentEval = new CombiningEvaluator.And(new StructuralEvaluator.ImmediatePreviousSibling(currentEval), newEval);
+                break;
             case '~':
-                return new CombiningEvaluator.And(new StructuralEvaluator.PreviousSibling(left), right);
+                currentEval = new CombiningEvaluator.And(new StructuralEvaluator.PreviousSibling(currentEval), newEval);
+                break;
+            case ',':
+                CombiningEvaluator.Or or;
+                if (currentEval instanceof CombiningEvaluator.Or) {
+                    or = (CombiningEvaluator.Or) currentEval;
+                } else {
+                    or = new CombiningEvaluator.Or();
+                    or.add(currentEval);
+                }
+                or.add(newEval);
+                currentEval = or;
+                break;
             default:
                 throw new Selector.SelectorParseException("Unknown combinator '%s'", combinator);
         }
+
+        if (replaceRightMost)
+            ((CombiningEvaluator.Or) rootEval).replaceRightMostEvaluator(currentEval);
+        else rootEval = currentEval;
+        evals.add(rootEval);
     }
 
-    @Nullable Evaluator parseSubclass() {
-        //  Subclass: ID | Class | Attribute | Pseudo
-        if      (tq.matchChomp('#'))    return byId();
-        else if (tq.matchChomp('.'))    return byClass();
-        else if (tq.matches('['))       return byAttribute();
-        else if (tq.matchChomp("::"))   return parseNodeSelector(); // ::comment etc
-        else if (tq.matchChomp(':'))    return parsePseudoSelector();
-        else                            return null;
-    }
-
-    /** Adds an alternative to an existing Or, or creates one for the first pair. */
-    private static Evaluator addAlternative(Evaluator left, Evaluator right) {
-        if (left instanceof CombiningEvaluator.Or) {
-            ((CombiningEvaluator.Or) left).add(right);
-            return left;
+    private String consumeSubQuery() {
+        StringBuilder sq = StringUtil.borrowBuilder();
+        while (!tq.isEmpty()) {
+            if (tq.matches("("))
+                sq.append("(").append(tq.chompBalanced('(', ')')).append(")");
+            else if (tq.matches("["))
+                sq.append("[").append(tq.chompBalanced('[', ']')).append("]");
+            else if (tq.matchesAny(Combinators))
+                if (sq.length() > 0)
+                    break;
+                else
+                    tq.consume();
+            else
+                sq.append(tq.consume());
         }
-        return new CombiningEvaluator.Or(left, right);
+        return StringUtil.releaseBuilder(sq);
+    }
+
+    private Evaluator consumeEvaluator() {
+        if (tq.matchChomp("#"))
+            return byId();
+        else if (tq.matchChomp("."))
+            return byClass();
+        else if (tq.matchesWord() || tq.matches("*|"))
+            return byTag();
+        else if (tq.matches("["))
+            return byAttribute();
+        else if (tq.matchChomp("*"))
+            return new Evaluator.AllElements();
+        else if (tq.matchChomp(":"))
+            return parsePseudoSelector();
+		else // unhandled
+            throw new Selector.SelectorParseException("Could not parse query '%s': unexpected token at '%s'", query, tq.remainder());
     }
 
     private Evaluator parsePseudoSelector() {
@@ -279,8 +189,6 @@ public class QueryParser implements AutoCloseable {
                 return new Evaluator.IndexEquals(consumeIndex());
             case "has":
                 return has();
-            case "is":
-                return is();
             case "contains":
                 return contains(false);
             case "containsOwn":
@@ -323,72 +231,12 @@ public class QueryParser implements AutoCloseable {
                 return new Evaluator.IsOnlyOfType();
             case "empty":
                 return new Evaluator.IsEmpty();
-            case "blank":
-                return new NodeEvaluator.BlankValue();
             case "root":
                 return new Evaluator.IsRoot();
-            case "matchText": {
-                throw new Selector.SelectorParseException(":matchText is no longer supported. Use Element#selectNodes(String, Class) with selector ::text and class TextNode instead."); // todo remove this in 1.25.1
-            }
+            case "matchText":
+                return new Evaluator.MatchText();
             default:
                 throw new Selector.SelectorParseException("Could not parse query '%s': unexpected token at '%s'", query, tq.remainder());
-        }
-    }
-
-    /** Parses a node selector and its subclasses in node-value context. */
-    private Evaluator parseNodeSelector() {
-        final String pseudo = tq.consumeCssIdentifier();
-        Evaluator nodeType;
-        switch (pseudo) {
-            case "node":
-                nodeType = new NodeEvaluator.InstanceType(Node.class, pseudo);
-                break;
-            case "leafnode":
-                nodeType = new NodeEvaluator.InstanceType(LeafNode.class, pseudo);
-                break;
-            case "text":
-                nodeType = new NodeEvaluator.InstanceType(TextNode.class, pseudo);
-                break;
-            case "comment":
-                nodeType = new NodeEvaluator.InstanceType(Comment.class, pseudo);
-                break;
-            case "data":
-                nodeType = new NodeEvaluator.InstanceType(DataNode.class, pseudo);
-                break;
-            case "cdata":
-                nodeType = new NodeEvaluator.InstanceType(CDataNode.class, pseudo);
-                break;
-            case "pi":
-                nodeType = piSelector();
-                break;
-            default:
-                throw new Selector.SelectorParseException(
-                    "Could not parse query '%s': unknown node type '::%s'", query, pseudo);
-        }
-
-        // nested selectors can enter node context again, e.g. ::comment:not(::text):contains(foo)
-        // restore the caller's context even if parsing a subclass throws
-        boolean previousNodeContext = inNodeContext;
-        inNodeContext = true;
-        try {
-            return parseRemainingSubclasses(nodeType);
-        } finally {
-            inNodeContext = previousNodeContext;
-        }
-    }
-
-    /** Parses an optional processing-instruction target. */
-    private Evaluator piSelector() {
-        if (!tq.matches('('))
-            return new NodeEvaluator.InstanceType(ProcessingInstruction.class, "pi");
-
-        String argument = trimAsciiWhitespace(consumeParens());
-        Validate.notEmpty(argument, "::pi target must not be empty");
-        try (TokenQueue targetQueue = new TokenQueue(argument)) {
-            String target = targetQueue.consumeCssIdentifier();
-            targetQueue.consumeWhitespace();
-            Validate.isTrue(targetQueue.isEmpty(), "::pi target must be a CSS identifier");
-            return new NodeEvaluator.ProcessingInstructionTarget(target);
         }
     }
 
@@ -408,49 +256,41 @@ public class QueryParser implements AutoCloseable {
         // todo - these aren't dealing perfectly with case sensitivity. For case sensitive parsers, we should also make
         // the tag in the selector case-sensitive (and also attribute names). But for now, normalize (lower-case) for
         // consistency - both the selector and the element tag
-        String tagName = asciiLowerCase(tq.consumeElementSelector());
+        String tagName = normalize(tq.consumeElementSelector());
         Validate.notEmpty(tagName);
+        final Evaluator eval;
 
-        // namespaces:
-        if (tagName.startsWith("*|")) { // namespaces: wildcard match equals(tagName) or ending in ":"+tagName
+        // namespaces: wildcard match equals(tagName) or ending in ":"+tagName
+        if (tagName.startsWith("*|")) {
             String plainTag = tagName.substring(2); // strip *|
-            return new CombiningEvaluator.Or(
+            eval = new CombiningEvaluator.Or(
                 new Evaluator.Tag(plainTag),
-                new Evaluator.TagEndsWith(":" + plainTag)
+                new Evaluator.TagEndsWith(tagName.replace("*|", ":"))
             );
-        } else if (tagName.endsWith("|*")) { // ns|*
-            String ns = tagName.substring(0, tagName.length() - 2) + ":"; // strip |*, to ns:
-            return new Evaluator.TagStartsWith(ns);
-        } else if (tagName.contains("|")) { // flip "abc|def" to "abc:def"
-            tagName = tagName.replace("|", ":");
-        }
+        } else {
+            // namespaces: if element name is "abc:def", selector must be "abc|def", so flip:
+            if (tagName.contains("|"))
+                tagName = tagName.replace("|", ":");
 
-        return new Evaluator.Tag(tagName);
+            eval = new Evaluator.Tag(tagName);
+        }
+        return eval;
     }
 
     private Evaluator byAttribute() {
-        try (TokenQueue cq = new TokenQueue(tq.chompBalanced('[', ']'))) {
-            return evaluatorForAttribute(cq);
-        }
-    }
-
-    private Evaluator evaluatorForAttribute(TokenQueue cq) {
+        TokenQueue cq = new TokenQueue(tq.chompBalanced('[', ']')); // content queue
         String key = cq.consumeToAny(AttributeEvals); // eq, not, start, end, contain, match, (no val)
-        key = asciiLowerCase(trimAsciiWhitespace(key));
         Validate.notEmpty(key);
-        Validate.isFalse(key.equals("abs:"), "Absolute attribute key must have a name");
         cq.consumeWhitespace();
         final Evaluator eval;
 
         if (cq.isEmpty()) {
             if (key.startsWith("^"))
                 eval = new Evaluator.AttributeStarting(key.substring(1));
-            else if (key.equals("*")) // any attribute
-                eval = new Evaluator.AttributeStarting("");
             else
                 eval = new Evaluator.Attribute(key);
         } else {
-            if (cq.matchChomp('='))
+            if (cq.matchChomp("="))
                 eval = new Evaluator.AttributeWithValue(key, cq.remainder());
             else if (cq.matchChomp("!="))
                 eval = new Evaluator.AttributeWithValueNot(key, cq.remainder());
@@ -461,48 +301,52 @@ public class QueryParser implements AutoCloseable {
             else if (cq.matchChomp("*="))
                 eval = new Evaluator.AttributeWithValueContaining(key, cq.remainder());
             else if (cq.matchChomp("~="))
-                eval = new Evaluator.AttributeWithValueMatching(key, Regex.compile(cq.remainder()));
+                eval = new Evaluator.AttributeWithValueMatching(key, Pattern.compile(cq.remainder()));
             else
-                throw new Selector.SelectorParseException(
-                    "Could not parse attribute query '%s': unexpected token at '%s'", query, cq.remainder());
+                throw new Selector.SelectorParseException("Could not parse attribute query '%s': unexpected token at '%s'", query, cq.remainder());
         }
         return eval;
     }
 
     //pseudo selectors :first-child, :last-child, :nth-child, ...
-    private static final Pattern NthStepOffset = Pattern.compile("(([+-])?(\\d+)?)n(\\s*([+-])?\\s*\\d+)?", Pattern.CASE_INSENSITIVE);
-    private static final Pattern NthOffset = Pattern.compile("([+-])?(\\d+)");
+    private static final Pattern NTH_AB = Pattern.compile("(([+-])?(\\d+)?)n(\\s*([+-])?\\s*\\d+)?", Pattern.CASE_INSENSITIVE);
+    private static final Pattern NTH_B  = Pattern.compile("([+-])?(\\d+)");
 
-    private Evaluator cssNthChild(boolean last, boolean ofType) {
-        String arg = asciiLowerCase(trimAsciiWhitespace(consumeParens())); // arg is like "odd", or "-n+2", within nth-child(odd)
-        final int step, offset;
-        if ("odd".equals(arg)) {
-            step = 2;
-            offset = 1;
-        } else if ("even".equals(arg)) {
-            step = 2;
-            offset = 0;
-        } else {
-            Matcher stepOffsetM, stepM;
-            if ((stepOffsetM = NthStepOffset.matcher(arg)).matches()) {
-                if (stepOffsetM.group(3) != null) // has digits, like 3n+2 or -3n+2
-                    step = Integer.parseInt(stepOffsetM.group(1).replaceFirst("^\\+", ""));
-                else // no digits, might be like n+2, or -n+2. if group(2) == "-", it’s -1;
-                    step = "-".equals(stepOffsetM.group(2)) ? -1 : 1;
-                offset =
-                    stepOffsetM.group(4) != null ? Integer.parseInt(stepOffsetM.group(4).replaceFirst("^\\+", "")) : 0;
-            } else if ((stepM = NthOffset.matcher(arg)).matches()) {
-                step = 0;
-                offset = Integer.parseInt(stepM.group().replaceFirst("^\\+", ""));
-            } else {
-                throw new Selector.SelectorParseException("Could not parse nth-index '%s': unexpected format", arg);
-            }
-        }
+	private Evaluator cssNthChild(boolean backwards, boolean ofType) {
+		String arg = normalize(consumeParens());
+		Matcher mAB = NTH_AB.matcher(arg);
+		Matcher mB = NTH_B.matcher(arg);
+		final int a, b;
+		if ("odd".equals(arg)) {
+			a = 2;
+			b = 1;
+		} else if ("even".equals(arg)) {
+			a = 2;
+			b = 0;
+		} else if (mAB.matches()) {
+			a = mAB.group(3) != null ? Integer.parseInt(mAB.group(1).replaceFirst("^\\+", "")) : 1;
+			b = mAB.group(4) != null ? Integer.parseInt(mAB.group(4).replaceFirst("^\\+", "")) : 0;
+		} else if (mB.matches()) {
+			a = 0;
+			b = Integer.parseInt(mB.group().replaceFirst("^\\+", ""));
+		} else {
+			throw new Selector.SelectorParseException("Could not parse nth-index '%s': unexpected format", arg);
+		}
 
-        return ofType
-            ? (last ? new Evaluator.IsNthLastOfType(step, offset) : new Evaluator.IsNthOfType(step, offset))
-            : (last ? new Evaluator.IsNthLastChild(step, offset) : new Evaluator.IsNthChild(step, offset));
-    }
+        final Evaluator eval;
+		if (ofType)
+			if (backwards)
+				eval = new Evaluator.IsNthLastOfType(a, b);
+			else
+				eval = new Evaluator.IsNthOfType(a, b);
+		else {
+			if (backwards)
+				eval = (new Evaluator.IsNthLastChild(a, b));
+			else
+				eval = new Evaluator.IsNthChild(a, b);
+		}
+        return eval;
+	}
 
     private String consumeParens() {
         return tq.chompBalanced('(', ')');
@@ -514,80 +358,11 @@ public class QueryParser implements AutoCloseable {
         return Integer.parseInt(index);
     }
 
-    /** Parses {@code :has()}, grouping consecutive alternatives that can share a traversal. */
+    // pseudo selector :has(el)
     private Evaluator has() {
-        String err = ":has() must have a selector";
-        SelectorGroup group = parseNestedSelectorGroup(err);
-        return new HasEvaluator(group.toString(), planTraversals(group));
-    }
-
-    /**
-     Chooses where to look and what to test for each {@code :has()} alternative.
-     Alternatives with the same scope share one traversal, so {@code :has(> a, > span)} visits the subject's children once.
-     */
-    private static List<Traversal> planTraversals(SelectorGroup group) {
-        List<Traversal> traversals = new ArrayList<>();
-        for (ComplexSelector selector : group.selectors) {
-            Scope scope = traversalScope(selector); // top-level combinators determine how far :has() must traverse
-            Evaluator evaluator = traversalEvaluator(selector, scope);
-            int last = traversals.size() - 1;
-            Traversal previous = last >= 0 ? traversals.get(last) : null;
-            if (previous != null && previous.scope == scope) {
-                traversals.set(last, new Traversal(addAlternative(previous.evaluator, evaluator), scope));
-            } else {
-                traversals.add(new Traversal(evaluator, scope));
-            }
-        }
-        return traversals;
-    }
-
-    /** Uses the rightmost evaluator when the traversal scope already guarantees the leading relationship. */
-    private static Evaluator traversalEvaluator(ComplexSelector selector, Scope scope) {
-        if (selector.combinatorCount != 1)
-            return selector.evaluator;
-
-        char leading = selector.leadingCombinator;
-        if (leading == '>' || leading == '~' || (leading == '+' && scope == Scope.NextSibling))
-            return selector.rightmost;
-        return selector.evaluator;
-    }
-
-    /** Chooses where to traverse for a {@code :has()} alternative. */
-    private static Scope traversalScope(ComplexSelector selector) {
-        char leading = selector.leadingCombinator;
-        if (leading == '>' && selector.combinatorCount == 1)
-            return Scope.Children;
-        if (leading == '+' || leading == '~') {
-            if (selector.combinatorCount > 1) {
-                if (leading == '+' && !selector.continuesToSibling && !selector.evaluator.wantsNodes())
-                    return Scope.NextSiblingTree;
-                return Scope.FollowingSiblingTrees;
-            }
-            if (leading == '+' && !selector.evaluator.wantsNodes())
-                return Scope.NextSibling;
-            return Scope.FollowingSiblings;
-        }
-        return Scope.Descendants;
-    }
-
-    // pseudo selector :is()
-    private Evaluator is() {
-        return parseNested(StructuralEvaluator.Is::new, ":is() must have a selector");
-    }
-
-    /** Parses a nested selector group and applies its compiled evaluator. */
-    private Evaluator parseNested(Function<Evaluator, Evaluator> func, String err) {
-        return func.apply(parseNestedSelectorGroup(err).evaluator());
-    }
-
-    /** Parses a non-empty selector group enclosed in parentheses. */
-    private SelectorGroup parseNestedSelectorGroup(String err) {
-        Validate.isTrue(tq.matchChomp('('), err);
-        tq.consumeWhitespace();
-        Validate.isTrue(!tq.isEmpty() && !tq.matches(')'), err);
-        SelectorGroup group = parseSelectorGroup();
-        Validate.isTrue(tq.matchChomp(')'), err);
-        return group;
+        String subQuery = consumeParens();
+        Validate.notEmpty(subQuery, ":has(selector) sub-select must not be empty");
+        return new StructuralEvaluator.Has(parse(subQuery));
     }
 
     // pseudo selector :contains(text), containsOwn(text)
@@ -595,10 +370,6 @@ public class QueryParser implements AutoCloseable {
         String query = own ? ":containsOwn" : ":contains";
         String searchText = TokenQueue.unescape(consumeParens());
         Validate.notEmpty(searchText, query + "(text) query must not be empty");
-
-        if (inNodeContext)
-            return new NodeEvaluator.ContainsValue(searchText);
-
         return own
             ? new Evaluator.ContainsOwnText(searchText)
             : new Evaluator.ContainsText(searchText);
@@ -625,14 +396,10 @@ public class QueryParser implements AutoCloseable {
         String query = own ? ":matchesOwn" : ":matches";
         String regex = consumeParens(); // don't unescape, as regex bits will be escaped
         Validate.notEmpty(regex, query + "(regex) query must not be empty");
-        Regex pattern = Regex.compile(regex);
-
-        if (inNodeContext)
-            return new NodeEvaluator.MatchesValue(pattern);
 
         return own
-            ? new Evaluator.MatchesOwn(pattern)
-            : new Evaluator.Matches(pattern);
+            ? new Evaluator.MatchesOwn(Pattern.compile(regex))
+            : new Evaluator.Matches(Pattern.compile(regex));
     }
 
     // :matches(regex), matchesOwn(regex)
@@ -641,24 +408,21 @@ public class QueryParser implements AutoCloseable {
         String regex = consumeParens(); // don't unescape, as regex bits will be escaped
         Validate.notEmpty(regex, query + "(regex) query must not be empty");
 
-        Regex pattern = Regex.compile(regex);
         return own
-            ? new Evaluator.MatchesWholeOwnText(pattern)
-            : new Evaluator.MatchesWholeText(pattern);
+            ? new Evaluator.MatchesWholeOwnText(Pattern.compile(regex))
+            : new Evaluator.MatchesWholeText(Pattern.compile(regex));
     }
 
-    /** Parses the selector group negated by {@code :not()}. */
+    // :not(selector)
     private Evaluator not() {
-        return parseNested(StructuralEvaluator.Not::new, ":not(selector) subselect must not be empty");
+        String subQuery = consumeParens();
+        Validate.notEmpty(subQuery, ":not(selector) subselect must not be empty");
+
+        return new StructuralEvaluator.Not(parse(subQuery));
     }
 
     @Override
     public String toString() {
         return query;
-    }
-
-    @Override
-    public void close() {
-        tq.close();
     }
 }

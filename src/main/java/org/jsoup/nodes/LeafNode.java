@@ -1,27 +1,11 @@
 package org.jsoup.nodes;
 
-import org.jsoup.helper.Validate;
-import org.jsoup.internal.QuietAppendable;
-import org.jspecify.annotations.Nullable;
-
 import java.util.List;
 
-/**
- A node that does not hold any children. E.g.: {@link TextNode}, {@link DataNode}, {@link Comment}.
- */
-public abstract class LeafNode extends Node {
-    Object value; // either a string, tracked string, or attributes object
+abstract class LeafNode extends Node {
+    Object value; // either a string value, or an attribute map (in the rare case multiple attributes are set)
 
-    public LeafNode() {
-        value = "";
-    }
-
-    protected LeafNode(String coreValue) {
-        Validate.notNull(coreValue);
-        value = coreValue;
-    }
-
-    @Override protected final boolean hasAttributes() {
+    protected final boolean hasAttributes() {
         return value instanceof Attributes;
     }
 
@@ -31,61 +15,36 @@ public abstract class LeafNode extends Node {
         return (Attributes) value;
     }
 
-    /** Expands this leaf's compact value into attribute storage when needed. */
-    final void ensureAttributes() {
+    private void ensureAttributes() {
         if (!hasAttributes()) {
-            String coreValue = coreValue();
-            Range.Spans rangeSpans = spans();
-            Attributes attributes = newAttributes(coreValue);
+            Object coreValue = value;
+            Attributes attributes = new Attributes();
             value = attributes;
-            if (rangeSpans != null)
-                attributes.putSpans(rangeSpans);
+            if (coreValue != null)
+                attributes.put(nodeName(), (String) coreValue);
         }
     }
 
-    /** Expands this leaf's compact value into attribute storage. */
-    Attributes newAttributes(String coreValue) {
-        Attributes attributes = new Attributes();
-        attributes.put(nodeName(), coreValue);
-        return attributes;
-    }
-
     String coreValue() {
-        if (value instanceof Attributes)   return ((Attributes) value).get(nodeName());
-        if (value instanceof TrackedValue) return ((TrackedValue) value).coreValue;
-        return (String) value;
-    }
-
-    @Override @Nullable
-    public Element parent() {
-        return parentNode;
-    }
-
-    @Override
-    public String nodeValue() {
-        return coreValue();
+        return attr(nodeName());
     }
 
     void coreValue(String value) {
-        if (this.value instanceof Attributes)
-            ((Attributes) this.value).put(nodeName(), value);
-        else if (this.value instanceof TrackedValue)
-            ((TrackedValue) this.value).coreValue = value;
-        else
-            this.value = value;
+        attr(nodeName(), value);
     }
 
     @Override
     public String attr(String key) {
-        if (!hasAttributes())
-            return nodeName().equals(key) ? coreValue() : EmptyString;
+        if (!hasAttributes()) {
+            return nodeName().equals(key) ? (String) value : EmptyString;
+        }
         return super.attr(key);
     }
 
     @Override
     public Node attr(String key, String value) {
         if (!hasAttributes() && key.equals(nodeName())) {
-            coreValue(value);
+            this.value = value;
         } else {
             ensureAttributes();
             super.attr(key, value);
@@ -113,7 +72,7 @@ public abstract class LeafNode extends Node {
 
     @Override
     public String baseUri() {
-        return parentNode != null ? parentNode.baseUri() : "";
+        return hasParent() ? parent().baseUri() : "";
     }
 
     @Override
@@ -137,68 +96,13 @@ public abstract class LeafNode extends Node {
     }
 
     @Override
-    void outerHtmlTail(QuietAppendable accum, Document.OutputSettings out) {}
-
-    @Override
     protected LeafNode doClone(Node parent) {
         LeafNode clone = (LeafNode) super.doClone(parent);
 
-        // Object value could be plain string, tracked string, or attributes - need to clone.
+        // Object value could be plain string or attributes - need to clone
         if (hasAttributes())
             clone.value = ((Attributes) value).clone();
-        else if (value instanceof TrackedValue)
-            clone.value = ((TrackedValue) value).copy();
 
         return clone;
-    }
-
-    @Override Range.@Nullable Spans spans() {
-        if (value instanceof TrackedValue)
-            return ((TrackedValue) value).spans;
-        return super.spans();
-    }
-
-    @Override Range.Spans ensureSpans() {
-        // Leaf nodes normally hold just their core string. When source ranges are tracked, keep the string plus spans
-        // in a small wrapper so leaf nodes do not expand to Attributes just for parser metadata. If attributes are
-        // later requested, ensureAttributes() moves these same spans into the Attributes object.
-        if (value instanceof TrackedValue)
-            return ((TrackedValue) value).spans;
-        if (value instanceof Attributes)
-            return ((Attributes) value).ensureSpans();
-
-        TrackedValue trackedValue = new TrackedValue((String) value);
-        value = trackedValue;
-        return trackedValue.spans;
-    }
-
-    /**
-     Holds a compact leaf value plus ranges without expanding to Attributes.
-     */
-    private static final class TrackedValue {
-        String coreValue;
-        final Range.Spans spans;
-
-        /**
-         Creates a tracked leaf value around the core text.
-         */
-        TrackedValue(String coreValue) {
-            this(coreValue, new Range.Spans());
-        }
-
-        /**
-         Creates a tracked leaf value around copied range spans.
-         */
-        TrackedValue(String coreValue, Range.Spans spans) {
-            this.coreValue = coreValue;
-            this.spans = spans;
-        }
-
-        /**
-         Returns a copy so cloned leaf nodes can mutate range spans independently.
-         */
-        TrackedValue copy() {
-            return new TrackedValue(coreValue, spans.copy());
-        }
     }
 }

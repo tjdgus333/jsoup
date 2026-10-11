@@ -1,37 +1,28 @@
 package org.jsoup.parser;
 
-import org.jsoup.helper.Validate;
-import org.jsoup.nodes.Attributes;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.Node;
-import org.jspecify.annotations.Nullable;
 
 import java.io.Reader;
 import java.io.StringReader;
 import java.util.List;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  Parses HTML or XML into a {@link org.jsoup.nodes.Document}. Generally, it is simpler to use one of the parse methods in
  {@link org.jsoup.Jsoup}.
- <p>Note that a given Parser instance object is threadsafe, but not concurrent. (Concurrent parse calls will
- synchronize.) To reuse a Parser configuration in a multithreaded environment, use {@link #newInstance()} to make
- copies.</p>
- */
-public class Parser implements Cloneable {
+ <p>Note that a Parser instance object is not threadsafe. To reuse a Parser configuration in a multi-threaded
+ environment, use {@link #newInstance()} to make copies. */
+public class Parser {
     public static final String NamespaceHtml = "http://www.w3.org/1999/xhtml";
     public static final String NamespaceXml = "http://www.w3.org/XML/1998/namespace";
     public static final String NamespaceMathml = "http://www.w3.org/1998/Math/MathML";
     public static final String NamespaceSvg = "http://www.w3.org/2000/svg";
 
-    private final TreeBuilder treeBuilder;
+    private TreeBuilder treeBuilder;
     private ParseErrorList errors;
     private ParseSettings settings;
     private boolean trackPosition = false;
-    private @Nullable TagSet tagSet;
-    private final ReentrantLock lock = new ReentrantLock();
-    private int maxDepth;
 
     /**
      * Create a new Parser, using the specified TreeBuilder
@@ -41,7 +32,6 @@ public class Parser implements Cloneable {
         this.treeBuilder = treeBuilder;
         settings = treeBuilder.defaultSettings();
         errors = ParseErrorList.noTracking();
-        maxDepth = treeBuilder.defaultMaxDepth();
     }
 
     /**
@@ -52,97 +42,24 @@ public class Parser implements Cloneable {
         return new Parser(this);
     }
 
-    @SuppressWarnings("MethodDoesntCallSuperMethod") // because we use the copy constructor instead
-    @Override
-    public Parser clone() {
-        return new Parser(this);
-    }
-
     private Parser(Parser copy) {
         treeBuilder = copy.treeBuilder.newInstance(); // because extended
         errors = new ParseErrorList(copy.errors); // only copies size, not contents
         settings = new ParseSettings(copy.settings);
         trackPosition = copy.trackPosition;
-        maxDepth = copy.maxDepth;
-        tagSet = new TagSet(copy.tagSet());
     }
-
-    /**
-     Parse the contents of a String.
-
-     @param html HTML to parse
-     @param baseUri base URI of document (i.e. original fetch location), for resolving relative URLs.
-     @return parsed Document
-     */
+    
     public Document parseInput(String html, String baseUri) {
-        return parseInput(new StringReader(html), baseUri);
+        return treeBuilder.parse(new StringReader(html), baseUri, this);
     }
 
-    /**
-     Parse the contents of Reader.
-
-     @param inputHtml HTML to parse
-     @param baseUri base URI of document (i.e. original fetch location), for resolving relative URLs.
-     @return parsed Document
-     @throws java.io.UncheckedIOException if an I/O error occurs in the Reader
-     */
     public Document parseInput(Reader inputHtml, String baseUri) {
-        try {
-            lock.lock(); // using a lock vs synchronized to support loom threads
-            return treeBuilder.parse(inputHtml, baseUri, this);
-        } finally {
-            lock.unlock();
-        }
+        return treeBuilder.parse(inputHtml, baseUri, this);
     }
 
-    /**
-     Parses attribute names and values without a surrounding tag, using this parser's settings.
-     Parsing stops at a tag closer, which is reported if error tracking is enabled.
-
-     @param input the attribute string to parse
-     @return the parsed attributes
-     @see #setTrackErrors(int)
-     @since 1.24.1
-     */
-    public Attributes parseAttributes(String input) {
-        try {
-            lock.lock();
-            return treeBuilder.parseAttributes(new StringReader(input), this);
-        } finally {
-            lock.unlock();
-        }
+    public List<Node> parseFragmentInput(String fragment, Element context, String baseUri) {
+        return treeBuilder.parseFragment(fragment, context, baseUri, this);
     }
-
-    /**
-     Parse a fragment of HTML into a list of nodes. The context element, if supplied, supplies parsing context.
-
-     @param fragment the fragment of HTML to parse
-     @param context (optional) the element that this HTML fragment is being parsed for (i.e. for inner HTML).
-     @param baseUri base URI of document (i.e. original fetch location), for resolving relative URLs.
-     @return list of nodes parsed from the input HTML.
-     */
-    public List<Node> parseFragmentInput(String fragment, @Nullable Element context, String baseUri) {
-        return parseFragmentInput(new StringReader(fragment), context, baseUri);
-    }
-
-    /**
-     Parse a fragment of HTML into a list of nodes. The context element, if supplied, supplies parsing context.
-
-     @param fragment the fragment of HTML to parse
-     @param context (optional) the element that this HTML fragment is being parsed for (i.e. for inner HTML).
-     @param baseUri base URI of document (i.e. original fetch location), for resolving relative URLs.
-     @return list of nodes parsed from the input HTML.
-     @throws java.io.UncheckedIOException if an I/O error occurs in the Reader
-     */
-    public List<Node> parseFragmentInput(Reader fragment, @Nullable Element context, String baseUri) {
-        try {
-            lock.lock();
-            return treeBuilder.parseFragment(fragment, context, baseUri, this);
-        } finally {
-            lock.unlock();
-        }
-    }
-
     // gets & sets
     /**
      * Get the TreeBuilder currently in use.
@@ -150,6 +67,17 @@ public class Parser implements Cloneable {
      */
     public TreeBuilder getTreeBuilder() {
         return treeBuilder;
+    }
+
+    /**
+     * Update the TreeBuilder used when parsing content.
+     * @param treeBuilder new TreeBuilder
+     * @return this, for chaining
+     */
+    public Parser setTreeBuilder(TreeBuilder treeBuilder) {
+        this.treeBuilder = treeBuilder;
+        treeBuilder.parser = this;
+        return this;
     }
 
     /**
@@ -218,50 +146,11 @@ public class Parser implements Cloneable {
     }
 
     /**
-     Set the parser's maximum stack depth (maximum number of open elements). When reached, new open elements will be
-     removed to prevent excessive nesting. Defaults to 512.
-
-     @param maxDepth maximum parser depth; must be >= 1
-     @return this Parser, for chaining
+     (An internal method, visible for Element. For HTML parse, signals that script and style text should be treated as
+     Data Nodes).
      */
-    public Parser setMaxDepth(int maxDepth) {
-        Validate.isTrue(maxDepth >= 1, "maxDepth must be >= 1");
-        this.maxDepth = maxDepth;
-        return this;
-    }
-
-    /**
-     * Get the maximum parser depth (maximum number of open elements).
-     * @return the current max parser depth
-     */
-    public int getMaxDepth() {
-        return maxDepth;
-    }
-
-    /**
-     Set a custom TagSet to use for this Parser. This allows you to define your own tags, and control how they are
-     parsed. For example, you can set a tag to preserve whitespace, or to be treated as a block tag.
-     <p>You can start with the {@link TagSet#Html()} defaults and customize, or a new empty TagSet.</p>
-
-     @param tagSet the TagSet to use. This gets copied, so that changes that the parse makes (tags found in the document will be added) do not clobber the original TagSet.
-     @return this Parser
-     @since 1.20.1
-     */
-    public Parser tagSet(TagSet tagSet) {
-        Validate.notNull(tagSet);
-        this.tagSet = new TagSet(tagSet); // copy it as we are going to mutate it
-        return this;
-    }
-
-    /**
-     Get the current TagSet for this Parser, which will be either this parser's default, or one that you have set.
-     @return the current TagSet. After the parse, this will contain any new tags that were found in the document.
-     @since 1.20.1
-     */
-    public TagSet tagSet() {
-        if (tagSet == null)
-            tagSet = treeBuilder.defaultTagSet();
-        return tagSet;
+    public boolean isContentForTagData(String normalName) {
+        return getTreeBuilder().isContentForTagData(normalName);
     }
 
     public String defaultNamespace() {
@@ -294,7 +183,7 @@ public class Parser implements Cloneable {
      */
     public static List<Node> parseFragment(String fragmentHtml, Element context, String baseUri) {
         HtmlTreeBuilder treeBuilder = new HtmlTreeBuilder();
-        return treeBuilder.parseFragment(new StringReader(fragmentHtml), context, baseUri, new Parser(treeBuilder));
+        return treeBuilder.parseFragment(fragmentHtml, context, baseUri, new Parser(treeBuilder));
     }
 
     /**
@@ -312,7 +201,7 @@ public class Parser implements Cloneable {
         HtmlTreeBuilder treeBuilder = new HtmlTreeBuilder();
         Parser parser = new Parser(treeBuilder);
         parser.errors = errorList;
-        return treeBuilder.parseFragment(new StringReader(fragmentHtml), context, baseUri, parser);
+        return treeBuilder.parseFragment(fragmentHtml, context, baseUri, parser);
     }
 
     /**
@@ -324,7 +213,7 @@ public class Parser implements Cloneable {
      */
     public static List<Node> parseXmlFragment(String fragmentXml, String baseUri) {
         XmlTreeBuilder treeBuilder = new XmlTreeBuilder();
-        return treeBuilder.parseFragment(new StringReader(fragmentXml), null, baseUri, new Parser(treeBuilder));
+        return treeBuilder.parseFragment(fragmentXml, baseUri, new Parser(treeBuilder));
     }
 
     /**
@@ -339,41 +228,24 @@ public class Parser implements Cloneable {
         Document doc = Document.createShell(baseUri);
         Element body = doc.body();
         List<Node> nodeList = parseFragment(bodyHtml, body, baseUri);
-        body.appendChildren(nodeList);
+        Node[] nodes = nodeList.toArray(new Node[0]); // the node list gets modified when re-parented
+        for (int i = nodes.length - 1; i > 0; i--) {
+            nodes[i].remove();
+        }
+        for (Node node : nodes) {
+            body.appendChild(node);
+        }
         return doc;
     }
 
     /**
-     Utility method to unescape HTML entities from a string.
-     <p>To track errors while unescaping, use
-     {@link #unescape(String, boolean)} with a Parser instance that has error tracking enabled.</p>
-
-     @param string HTML escaped string
-     @param inAttribute if the string is to be escaped in strict mode (as attributes are)
-     @return an unescaped string
-     @see #unescape(String, boolean)
+     * Utility method to unescape HTML entities from a string
+     * @param string HTML escaped string
+     * @param inAttribute if the string is to be escaped in strict mode (as attributes are)
+     * @return an unescaped string
      */
     public static String unescapeEntities(String string, boolean inAttribute) {
-        Validate.notNull(string);
-        if (string.indexOf('&') < 0) return string; // nothing to unescape
-        return Parser.htmlParser().unescape(string, inAttribute);
-    }
-
-    /**
-     Utility method to unescape HTML entities from a string, using this {@code Parser}'s configuration (for example, to
-     collect errors while unescaping).
-
-     @param string HTML escaped string
-     @param inAttribute if the string is to be escaped in strict mode (as attributes are)
-     @return an unescaped string
-     @see #setTrackErrors(int)
-     @see #unescapeEntities(String, boolean)
-     */
-    public String unescape(String string, boolean inAttribute) {
-        Validate.notNull(string);
-        if (string.indexOf('&') < 0) return string; // nothing to unescape
-        this.treeBuilder.initialiseParse(new StringReader(string), "", this);
-        Tokeniser tokeniser = new Tokeniser(this.treeBuilder);
+        Tokeniser tokeniser = new Tokeniser(new CharacterReader(string), ParseErrorList.noTracking());
         return tokeniser.unescapeEntities(inAttribute);
     }
 

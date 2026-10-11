@@ -1,81 +1,35 @@
 package org.jsoup.parser;
 
 import org.jsoup.helper.Validate;
-import org.jsoup.internal.StringUtil;
-import org.jspecify.annotations.Nullable;
+import org.jsoup.internal.Normalizer;
 
-import java.util.Objects;
-
-import static org.jsoup.internal.Normalizer.asciiLowerCase;
-import static org.jsoup.parser.Parser.NamespaceHtml;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Consumer;
 
 /**
- A Tag represents an Element's name and configured options, common throughout the Document. Options may affect the parse
- and output.
- <p>A tag's normalized name uses ASCII lowercase; other characters are unchanged.</p>
-
- @see TagSet
- @see Parser#tagSet(TagSet) */
+ * Tag capabilities.
+ *
+ * @author Jonathan Hedley, jonathan@hedley.net
+ */
 public class Tag implements Cloneable {
-    /** Tag option: the tag is known (specifically defined). This impacts if options may need to be inferred (when not
-     known) in, e.g., the pretty-printer. Set when a tag is added to a TagSet, or when settings are set(). */
-    public static int Known = 1;
-    /** Tag option: the tag is a void tag (e.g., {@code <img>}), that can contain no children, and in HTML does not require closing. */
-    public static int Void = 1 << 1;
-    /** Tag option: the tag is a block tag (e.g., {@code <div>}, {@code <p>}). Causes the element to be indented when pretty-printing. If not a block, it is inline. */
-    public static int Block = 1 << 2;
-    /** Tag option: pretty-print hint for block tags whose inline children should stay inline. (Must also set Block.) */
-    public static int InlineContainer = 1 << 3;
-    /** Tag option: the tag can self-close (e.g., {@code <foo />}). */
-    public static int SelfClose = 1 << 4;
-    /** Tag option: the tag has been seen self-closing in this parse. */
-    public static int SeenSelfClose = 1 << 5;
-    /** Tag option: the tag preserves whitespace (e.g., {@code <pre>}). */
-    public static int PreserveWhitespace = 1 << 6;
-    /** Tag option: the tag is an RCDATA element that can have text and character references (e.g., {@code <title>}, {@code <textarea>}). */
-    public static int RcData = 1 << 7;
-    /** Tag option: the tag is a Data element that can have text but not character references (e.g., {@code <style>}, {@code <script>}). */
-    public static int Data = 1 << 8;
-    /** Tag option: the tag's value will be included when submitting a form (e.g., {@code <input>}). */
-    public static int FormSubmittable = 1 << 9;
-    /** Tag option: readable text boundary for {@code Element.text()}, used for controls, widgets, and embedded objects. */
-    public static int TextBoundary = 1 << 10;
+    private static final Map<String, Tag> Tags = new HashMap<>(); // map of known tags
 
-    String namespace;
-    String tagName;
-    String normalName; // always the lower case version of this tag, regardless of case preservation mode
-    int options = 0;
-    private int parserOptions = 0; // internal tree-builder options; see HtmlTagOptions
+    private String tagName;
+    private final String normalName; // always the lower case version of this tag, regardless of case preservation mode
+    private String namespace;
+    private boolean isBlock = true; // block
+    private boolean formatAsBlock = true; // should be formatted as a block
+    private boolean empty = false; // can hold nothing; e.g. img
+    private boolean selfClosing = false; // can self close (<foo />). used for unknown tags that self close, without forcing them as empty.
+    private boolean preserveWhitespace = false; // for pre, textarea, script etc
+    private boolean formList = false; // a control that appears in forms: input, textarea, output etc
+    private boolean formSubmit = false; // a control that can be submitted in a form: input etc
 
-    /**
-     Create a new Tag, with the given name and namespace.
-     <p>The tag is not implicitly added to any TagSet.</p>
-     @param tagName the name of the tag. Case-sensitive.
-     @param namespace the namespace for the tag.
-     @see TagSet#valueOf(String, String)
-     @since 1.20.1
-     */
-    public Tag(String tagName, String namespace) {
-        this(tagName, asciiLowerCase(tagName), namespace);
-    }
-
-    /**
-     Create a new Tag, with the given name, in the HTML namespace.
-     <p>The tag is not implicitly added to any TagSet.</p>
-     @param tagName the name of the tag. Case-sensitive.
-     @see TagSet#valueOf(String, String)
-     @since 1.20.1
-     */
-    public Tag(String tagName) {
-        this(tagName, asciiLowerCase(tagName), NamespaceHtml);
-    }
-
-    /** Path for TagSet defaults, no options set; normal name is already LC. */
-    Tag(String tagName, String normalName, String namespace) {
+    private Tag(String tagName, String namespace) {
         this.tagName = tagName;
-        this.normalName = normalName;
+        normalName = Normalizer.lowerCase(tagName);
         this.namespace = namespace;
-        setParserOptions();
     }
 
     /**
@@ -88,141 +42,15 @@ public class Tag implements Cloneable {
     }
 
     /**
-     Get this tag's name.
-     @return the tag's name
-     */
-    public String name() {
-        return tagName;
-    }
-
-    /**
-     Change the tag's name. As Tags are reused throughout a Document, this will change the name for all uses of this tag.
-     @param tagName the new name of the tag. Case-sensitive.
-     @return this tag
-     @throws IllegalArgumentException if this is a Data or RcData tag and the name cannot form a recognizable end tag
-     @since 1.20.1
-     */
-    public Tag name(String tagName) {
-        if (is(RcData) || is(Data)) validateTextTagName(tagName);
-        this.tagName = tagName;
-        this.normalName = asciiLowerCase(tagName);
-        setParserOptions();
-        return this;
-    }
-
-    /**
-     Get this tag's prefix, if it has one; else the empty string.
-     <p>For example, {@code <book:title>} has prefix {@code book}, and tag name {@code book:title}.</p>
-     @return the tag's prefix
-     @since 1.20.1
-     */
-    public String prefix() {
-        int pos = tagName.indexOf(':');
-        if (pos == -1) return "";
-        else return tagName.substring(0, pos);
-    }
-
-    /**
-     Get this tag's local name. The local name is the name without the prefix (if any).
-     <p>For exmaple, {@code <book:title>} has local name {@code title}, and tag name {@code book:title}.</p>
-     @return the tag's local name
-     @since 1.20.1
-     */
-    public String localName() {
-        int pos = tagName.indexOf(':');
-        if (pos == -1) return tagName;
-        else return tagName.substring(pos + 1);
-    }
-
-    /**
-     * Get this tag's normalized name.
+     * Get this tag's normalized (lowercased) name.
      * @return the tag's normal name.
      */
     public String normalName() {
         return normalName;
     }
 
-    /**
-     Get this tag's namespace.
-     @return the tag's namespace
-     */
     public String namespace() {
         return namespace;
-    }
-
-    /**
-     Set the tag's namespace. As Tags are reused throughout a Document, this will change the namespace for all uses of this tag.
-     @param namespace the new namespace of the tag.
-     @return this tag
-     @since 1.20.1
-     */
-    public Tag namespace(String namespace) {
-        this.namespace = namespace;
-        setParserOptions();
-        return this;
-    }
-
-    /**
-     Set an option on this tag.
-     <p>Once a tag has a setting applied, it will be considered a known tag.</p>
-     @param option the option to set
-     @return this tag
-     @throws IllegalArgumentException if setting Data or RcData on a tag whose name cannot form a recognizable end tag
-     @since 1.20.1
-     */
-    public Tag set(int option) {
-        if ((option & (RcData | Data)) != 0) validateTextTagName(tagName);
-        options |= option;
-        options |= Tag.Known; // considered known if touched
-        return this;
-    }
-
-    /** Ensures a text-mode tag has an unambiguous tokenizer end tag. */
-    private static void validateTextTagName(String name) {
-        boolean valid = !name.isEmpty() && StringUtil.isAsciiLetter(name.charAt(0));
-        for (int i = 0; valid && i < name.length(); i++) {
-            char c = name.charAt(i);
-            valid = c != '<' && c != '>' && c != '/' && c != '\0' && c != '\uFFFD' && !StringUtil.isWhitespace(c);
-        }
-        Validate.isTrue(valid, "Data and RcData tag names must start with an ASCII letter and contain no whitespace, '<', '>', '/', null, or replacement characters");
-    }
-
-    /**
-     Test if an option is set on this tag.
-
-     @param option the option to test
-     @return true if the option is set
-     @since 1.20.1
-     */
-    public boolean is(int option) {
-        return (options & option) != 0;
-    }
-
-    /**
-     Clear (unset) an option from this tag.
-     @param option the option to clear
-     @return this tag
-     @since 1.20.1
-     */
-    public Tag clear(int option) {
-        options &= ~option;
-        // considered known if touched, unless explicitly clearing known
-        if (option != Tag.Known) options |= Tag.Known;
-        return this;
-    }
-
-    /**
-     Set the cached parser options from the current name and namespace.
-     */
-    void setParserOptions() {
-        parserOptions = HtmlTagOptions.optionsFor(normalName, namespace);
-    }
-
-    /**
-     Test if this tag has the given parser option.
-     */
-    boolean hasParserOption(int option) {
-        return (parserOptions & option) != 0;
     }
 
     /**
@@ -234,11 +62,32 @@ public class Tag implements Cloneable {
      * @param tagName Name of tag, e.g. "p". Case-insensitive.
      * @param namespace the namespace for the tag.
      * @param settings used to control tag name sensitivity
-     * @see TagSet
      * @return The tag, either defined or new generic.
      */
     public static Tag valueOf(String tagName, String namespace, ParseSettings settings) {
-        return TagSet.Html().valueOf(tagName, null, namespace, settings.preserveTagCase());
+        Validate.notEmpty(tagName);
+        Validate.notNull(namespace);
+        Tag tag = Tags.get(tagName);
+        if (tag != null && tag.namespace.equals(namespace))
+            return tag;
+
+        tagName = settings.normalizeTag(tagName); // the name we'll use
+        Validate.notEmpty(tagName);
+        String normalName = Normalizer.lowerCase(tagName); // the lower-case name to get tag settings off
+        tag = Tags.get(normalName);
+        if (tag != null && tag.namespace.equals(namespace)) {
+            if (settings.preserveTagCase() && !tagName.equals(normalName)) {
+                tag = tag.clone(); // get a new version vs the static one, so name update doesn't reset all
+                tag.tagName = tagName;
+            }
+            return tag;
+        }
+
+        // not defined: create default; go anywhere, do anything! (incl be inside a <p>)
+        tag = new Tag(tagName, namespace);
+        tag.isBlock = false;
+
+        return tag;
     }
 
     /**
@@ -252,7 +101,7 @@ public class Tag implements Cloneable {
      * @see #valueOf(String tagName, String namespace, ParseSettings settings)
      */
     public static Tag valueOf(String tagName) {
-        return valueOf(tagName, NamespaceHtml, ParseSettings.preserveCase);
+        return valueOf(tagName, Parser.NamespaceHtml, ParseSettings.preserveCase);
     }
 
     /**
@@ -267,7 +116,7 @@ public class Tag implements Cloneable {
      * @see #valueOf(String tagName, String namespace, ParseSettings settings)
      */
     public static Tag valueOf(String tagName, ParseSettings settings) {
-        return valueOf(tagName, NamespaceHtml, settings);
+        return valueOf(tagName, Parser.NamespaceHtml, settings);
     }
 
     /**
@@ -276,25 +125,34 @@ public class Tag implements Cloneable {
      * @return if block tag
      */
     public boolean isBlock() {
-        return (options & Block) != 0;
+        return isBlock;
     }
 
     /**
-     * Gets if this tag is an inline tag. Just the opposite of isBlock.
+     * Gets if this tag should be formatted as a block (or as inline)
+     *
+     * @return if should be formatted as block or inline
+     */
+    public boolean formatAsBlock() {
+        return formatAsBlock;
+    }
+
+    /**
+     * Gets if this tag is an inline tag.
      *
      * @return if this tag is an inline tag.
      */
     public boolean isInline() {
-        return (options & Block) == 0;
+        return !isBlock;
     }
 
     /**
-     Get if this is void (aka empty) tag.
-
-     @return true if this is a void tag
+     * Get if this is an empty tag
+     *
+     * @return if this is an empty tag
      */
     public boolean isEmpty() {
-        return (options & Void) != 0;
+        return empty;
     }
 
     /**
@@ -303,26 +161,26 @@ public class Tag implements Cloneable {
      * @return if this tag should be output as self-closing.
      */
     public boolean isSelfClosing() {
-        return (options & SelfClose) != 0 || (options & Void) != 0;
+        return empty || selfClosing;
     }
 
     /**
-     * Get if this is a pre-defined tag in the TagSet, or was auto created on parsing.
+     * Get if this is a pre-defined tag, or was auto created on parsing.
      *
      * @return if a known tag
      */
     public boolean isKnownTag() {
-        return (options & Known) != 0;
+        return Tags.containsKey(tagName);
     }
 
     /**
-     * Check if this tag name is a known HTML tag.
+     * Check if this tagname is a known tag.
      *
      * @param tagName name of tag
      * @return if known HTML tag
      */
     public static boolean isKnownTag(String tagName) {
-        return TagSet.HtmlTagSet.get(tagName, NamespaceHtml) != null;
+        return Tags.containsKey(tagName);
     }
 
     /**
@@ -331,7 +189,15 @@ public class Tag implements Cloneable {
      * @return if preserve whitespace
      */
     public boolean preserveWhitespace() {
-        return (options & PreserveWhitespace) != 0;
+        return preserveWhitespace;
+    }
+
+    /**
+     * Get if this tag represents a control associated with a form. E.g. input, textarea, output
+     * @return if associated with a form
+     */
+    public boolean isFormListed() {
+        return formList;
     }
 
     /**
@@ -339,39 +205,42 @@ public class Tag implements Cloneable {
      * @return if submittable with a form
      */
     public boolean isFormSubmittable() {
-        return (options & FormSubmittable) != 0;
+        return formSubmit;
     }
 
-    void setSeenSelfClose() {
-        options |= Tag.SeenSelfClose; // does not change known status
-    }
-
-    /**
-     If this Tag uses a specific text TokeniserState for its content, returns that; otherwise null.
-     */
-    @Nullable TokeniserState textState() {
-        if (is(RcData)) return TokeniserState.Rcdata;
-        if (is(Data))   return TokeniserState.Rawtext;
-        else            return null;
+    Tag setSelfClosing() {
+        selfClosing = true;
+        return this;
     }
 
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof Tag)) return false;
+
         Tag tag = (Tag) o;
-        return Objects.equals(tagName, tag.tagName) &&
-            Objects.equals(namespace, tag.namespace) &&
-            Objects.equals(normalName, tag.normalName) &&
-            options == tag.options;
+
+        if (!tagName.equals(tag.tagName)) return false;
+        if (empty != tag.empty) return false;
+        if (formatAsBlock != tag.formatAsBlock) return false;
+        if (isBlock != tag.isBlock) return false;
+        if (preserveWhitespace != tag.preserveWhitespace) return false;
+        if (selfClosing != tag.selfClosing) return false;
+        if (formList != tag.formList) return false;
+        return formSubmit == tag.formSubmit;
     }
 
-    /**
-     Hashcode of this Tag, consisting of the tag name and namespace.
-     */
     @Override
     public int hashCode() {
-        return Objects.hash(tagName, namespace); // options not included so that mutations do not prevent use as a key
+        int result = tagName.hashCode();
+        result = 31 * result + (isBlock ? 1 : 0);
+        result = 31 * result + (formatAsBlock ? 1 : 0);
+        result = 31 * result + (empty ? 1 : 0);
+        result = 31 * result + (selfClosing ? 1 : 0);
+        result = 31 * result + (preserveWhitespace ? 1 : 0);
+        result = 31 * result + (formList ? 1 : 0);
+        result = 31 * result + (formSubmit ? 1 : 0);
+        return result;
     }
 
     @Override
@@ -388,5 +257,85 @@ public class Tag implements Cloneable {
         }
     }
 
+    // internal static initialisers:
+    // prepped from http://www.w3.org/TR/REC-html40/sgml/dtd.html and other sources
+    private static final String[] blockTags = {
+            "html", "head", "body", "frameset", "script", "noscript", "style", "meta", "link", "title", "frame",
+            "noframes", "section", "nav", "aside", "hgroup", "header", "footer", "p", "h1", "h2", "h3", "h4", "h5", "h6",
+            "ul", "ol", "pre", "div", "blockquote", "hr", "address", "figure", "figcaption", "form", "fieldset", "ins",
+            "del", "dl", "dt", "dd", "li", "table", "caption", "thead", "tfoot", "tbody", "colgroup", "col", "tr", "th",
+            "td", "video", "audio", "canvas", "details", "menu", "plaintext", "template", "article", "main",
+            "svg", "math", "center", "template",
+            "dir", "applet", "marquee", "listing" // deprecated but still known / special handling
+    };
+    private static final String[] inlineTags = {
+            "object", "base", "font", "tt", "i", "b", "u", "big", "small", "em", "strong", "dfn", "code", "samp", "kbd",
+            "var", "cite", "abbr", "time", "acronym", "mark", "ruby", "rt", "rp", "rtc", "a", "img", "br", "wbr", "map", "q",
+            "sub", "sup", "bdo", "iframe", "embed", "span", "input", "select", "textarea", "label", "button", "optgroup",
+            "option", "legend", "datalist", "keygen", "output", "progress", "meter", "area", "param", "source", "track",
+            "summary", "command", "device", "area", "basefont", "bgsound", "menuitem", "param", "source", "track",
+            "data", "bdi", "s", "strike", "nobr",
+            "rb", // deprecated but still known / special handling
+            "text", // in SVG NS
+            "mi", "mo", "msup", "mn", "mtext" // in MathML NS, to ensure inline
+    };
+    private static final String[] emptyTags = {
+            "meta", "link", "base", "frame", "img", "br", "wbr", "embed", "hr", "input", "keygen", "col", "command",
+            "device", "area", "basefont", "bgsound", "menuitem", "param", "source", "track"
+    };
+    // todo - rework this to format contents as inline; and update html emitter in Element. Same output, just neater.
+    private static final String[] formatAsInlineTags = {
+            "title", "a", "p", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "address", "li", "th", "td", "script", "style",
+            "ins", "del", "s"
+    };
+    private static final String[] preserveWhitespaceTags = {
+            "pre", "plaintext", "title", "textarea"
+            // script is not here as it is a data node, which always preserve whitespace
+    };
+    // todo: I think we just need submit tags, and can scrub listed
+    private static final String[] formListedTags = {
+            "button", "fieldset", "input", "keygen", "object", "output", "select", "textarea"
+    };
+    private static final String[] formSubmitTags = {
+            "input", "keygen", "object", "select", "textarea"
+    };
 
+    private static final Map<String, String[]> namespaces = new HashMap<>();
+    static {
+        namespaces.put(Parser.NamespaceMathml, new String[]{"math", "mi", "mo", "msup", "mn", "mtext"});
+        namespaces.put(Parser.NamespaceSvg, new String[]{"svg", "text"});
+        // We don't need absolute coverage here as other cases will be inferred by the HtmlTreeBuilder
+    }
+
+    private static void setupTags(String[] tagNames, Consumer<Tag> tagModifier) {
+        for (String tagName : tagNames) {
+            Tag tag = Tags.get(tagName);
+            if (tag == null) {
+                tag = new Tag(tagName, Parser.NamespaceHtml);
+                Tags.put(tag.tagName, tag);
+            }
+            tagModifier.accept(tag);
+        }
+    }
+
+    static {
+        setupTags(blockTags, tag -> {
+            tag.isBlock = true;
+            tag.formatAsBlock = true;
+        });
+
+        setupTags(inlineTags, tag -> {
+            tag.isBlock = false;
+            tag.formatAsBlock = false;
+        });
+
+        setupTags(emptyTags, tag -> tag.empty = true);
+        setupTags(formatAsInlineTags, tag -> tag.formatAsBlock = false);
+        setupTags(preserveWhitespaceTags, tag -> tag.preserveWhitespace = true);
+        setupTags(formListedTags, tag -> tag.formList = true);
+        setupTags(formSubmitTags, tag -> tag.formSubmit = true);
+        for (Map.Entry<String, String[]> ns : namespaces.entrySet()) {
+            setupTags(ns.getValue(), tag -> tag.namespace = ns.getKey());
+        }
+    }
 }

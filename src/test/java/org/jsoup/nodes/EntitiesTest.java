@@ -4,8 +4,6 @@ import org.jsoup.Jsoup;
 import org.jsoup.parser.Parser;
 import org.junit.jupiter.api.Test;
 
-import java.nio.charset.StandardCharsets;
-
 import static org.jsoup.nodes.Document.OutputSettings;
 import static org.jsoup.nodes.Entities.EscapeMode.*;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -13,19 +11,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class EntitiesTest {
     @Test public void escape() {
-        // escape is maximal (as in the escapes cover use in both text and attributes; vs Element.html() which checks if attribute or text and minimises escapes
-        String text = "Hello &<> Å å π 新 there ¾ © » ' \"";
+        String text = "Hello &<> Å å π 新 there ¾ © »";
         String escapedAscii = Entities.escape(text, new OutputSettings().charset("ascii").escapeMode(base));
         String escapedAsciiFull = Entities.escape(text, new OutputSettings().charset("ascii").escapeMode(extended));
         String escapedAsciiXhtml = Entities.escape(text, new OutputSettings().charset("ascii").escapeMode(xhtml));
         String escapedUtfFull = Entities.escape(text, new OutputSettings().charset("UTF-8").escapeMode(extended));
         String escapedUtfMin = Entities.escape(text, new OutputSettings().charset("UTF-8").escapeMode(xhtml));
 
-        assertEquals("Hello &amp;&lt;&gt; &Aring; &aring; &#x3c0; &#x65b0; there &frac34; &copy; &raquo; &apos; &quot;", escapedAscii);
-        assertEquals("Hello &amp;&lt;&gt; &angst; &aring; &pi; &#x65b0; there &frac34; &copy; &raquo; &apos; &quot;", escapedAsciiFull);
-        assertEquals("Hello &amp;&lt;&gt; &#xc5; &#xe5; &#x3c0; &#x65b0; there &#xbe; &#xa9; &#xbb; &#x27; &quot;", escapedAsciiXhtml);
-        assertEquals("Hello &amp;&lt;&gt; Å å π 新 there ¾ © » &apos; &quot;", escapedUtfFull);
-        assertEquals("Hello &amp;&lt;&gt; Å å π 新 there ¾ © » &#x27; &quot;", escapedUtfMin);
+        assertEquals("Hello &amp;&lt;&gt; &Aring; &aring; &#x3c0; &#x65b0; there &frac34; &copy; &raquo;", escapedAscii);
+        assertEquals("Hello &amp;&lt;&gt; &angst; &aring; &pi; &#x65b0; there &frac34; &copy; &raquo;", escapedAsciiFull);
+        assertEquals("Hello &amp;&lt;&gt; &#xc5; &#xe5; &#x3c0; &#x65b0; there &#xbe; &#xa9; &#xbb;", escapedAsciiXhtml);
+        assertEquals("Hello &amp;&lt;&gt; Å å π 新 there ¾ © »", escapedUtfFull);
+        assertEquals("Hello &amp;&lt;&gt; Å å π 新 there ¾ © »", escapedUtfMin);
         // odd that it's defined as aring in base but angst in full
 
         // round trip
@@ -34,12 +31,6 @@ public class EntitiesTest {
         assertEquals(text, Entities.unescape(escapedAsciiXhtml));
         assertEquals(text, Entities.unescape(escapedUtfFull));
         assertEquals(text, Entities.unescape(escapedUtfMin));
-    }
-
-    @Test public void escapeDefaults() {
-        String text = "Hello &<> Å å π 新 there ¾ © » ' \"";
-        String escaped = Entities.escape(text);
-        assertEquals("Hello &amp;&lt;&gt; Å å π 新 there ¾ © » &apos; &quot;", escaped);
     }
 
     @Test public void escapedSupplementary() {
@@ -81,40 +72,11 @@ public class EntitiesTest {
     }
 
     @Test public void escapeSupplementaryCharacter() {
-        // Supplementary code points are escaped for ASCII but preserved for UTF-8
         String text = new String(Character.toChars(135361));
         String escapedAscii = Entities.escape(text, new OutputSettings().charset("ascii").escapeMode(base));
         assertEquals("&#x210c1;", escapedAscii);
         String escapedUtf = Entities.escape(text, new OutputSettings().charset("UTF-8").escapeMode(base));
         assertEquals(text, escapedUtf);
-
-        // The low 16 bits of U+1D800 form a surrogate code unit; UTF-8 must still preserve the full code point
-        String textWithSurrogateCodeUnit = new String(Character.toChars(0x1D800));
-        assertEquals(textWithSurrogateCodeUnit,
-            Entities.escape(textWithSurrogateCodeUnit, new OutputSettings().charset("UTF-8").escapeMode(base)));
-    }
-
-    @Test public void escapeSupplementaryNonUtf() {
-        // U+100A3 is supplementary, but its low 16 bits are U+00A3, which ISO-8859-1 can encode
-        String text = new String(Character.toChars(0x100A3));
-        String escaped = Entities.escape(text, new OutputSettings()
-            .charset(StandardCharsets.ISO_8859_1)
-            .escapeMode(base));
-
-        assertEquals("&#x100a3;", escaped);
-    }
-
-    @Test public void escapeSupplementarySequenceNonUtf() {
-        // A non-UTF encoder must check the complete supplementary character, not just its low 16 bits.
-        // before this fix, those low 16-bit checks decided U+100A3 and U+100A9 were encodable, so the original
-        // code points were emitted raw rather than escaped
-        String text = "A" + new String(Character.toChars(0x100A3))
-            + " & " + new String(Character.toChars(0x100A9)) + " Z";
-        String escaped = Entities.escape(text, new OutputSettings()
-            .charset(StandardCharsets.ISO_8859_1)
-            .escapeMode(base));
-
-        assertEquals("A&#x100a3; &amp; &#x100a9; Z", escaped);
     }
 
     @Test public void notMissingMultis() {
@@ -143,13 +105,6 @@ public class EntitiesTest {
         assertEquals("Hello &= &", Entities.unescape(text, false));
     }
 
-    @Test public void prefixMatch() {
-        // https://github.com/jhy/jsoup/issues/2207
-        // example from https://html.spec.whatwg.org/multipage/parsing.html#character-reference-state
-        String text = "I'm &notit; I tell you. I'm &notin; I tell you.";
-        assertEquals("I'm ¬it; I tell you. I'm ∉ I tell you.", Entities.unescape(text, false));
-        assertEquals("I'm &notit; I tell you. I'm ∉ I tell you.", Entities.unescape(text, true)); // not for attributes
-    }
 
     @Test public void caseSensitive() {
         String unescaped = "Ü ü & &";
@@ -183,29 +138,31 @@ public class EntitiesTest {
         assertEquals(string, Entities.unescape(string));
     }
 
-    @Test public void alwaysEscapeLtAndGtInAttributeValues() {
-        // https://github.com/jhy/jsoup/issues/2337
+    @Test public void escapesGtInXmlAttributesButNotInHtml() {
+        // https://github.com/jhy/jsoup/issues/528 - < is OK in HTML attribute values, but not in XML
+
 
         String docHtml = "<a title='<p>One</p>'>One</a>";
         Document doc = Jsoup.parse(docHtml);
         Element element = doc.select("a").first();
 
         doc.outputSettings().escapeMode(base);
-        assertEquals("<a title=\"&lt;p&gt;One&lt;/p&gt;\">One</a>", element.outerHtml());
+        assertEquals("<a title=\"<p>One</p>\">One</a>", element.outerHtml());
 
         doc.outputSettings().escapeMode(xhtml);
-        assertEquals("<a title=\"&lt;p&gt;One&lt;/p&gt;\">One</a>", element.outerHtml());
+        assertEquals("<a title=\"&lt;p>One&lt;/p>\">One</a>", element.outerHtml());
     }
 
     @Test public void controlCharactersAreEscaped() {
         // https://github.com/jhy/jsoup/issues/1556
-        // escape in HTML for legibility; remove from xml
+        // we escape ascii control characters in both HTML and XML for compatibility. Required in XML and probably
+        // easier to read in HTML
         String input = "<a foo=\"&#x1b;esc&#x7;bell\">Text &#x1b; &#x7;</a>";
         Document doc = Jsoup.parse(input);
         assertEquals(input, doc.body().html());
 
         Document xml = Jsoup.parse(input, "", Parser.xmlParser());
-        assertEquals("<a foo=\"escbell\">Text  </a>", xml.html());
+        assertEquals(input, xml.html());
     }
     
     @Test public void escapeByClonedOutputSettings() {
@@ -217,15 +174,5 @@ public class EntitiesTest {
         String escaped1 = assertDoesNotThrow(() -> Entities.escape(text, clone1));
         String escaped2 = assertDoesNotThrow(() -> Entities.escape(text, clone2));
         assertEquals(escaped1, escaped2);
-    }
-
-    @Test void parseHtmlEncodedEmojiMultipoint() {
-        String emoji = Parser.unescapeEntities("&#55357;&#56495;", false); // 💯
-        assertEquals("\uD83D\uDCAF", emoji);
-    }
-
-    @Test void parseHtmlEncodedEmoji() {
-        String emoji = Parser.unescapeEntities("&#128175;", false); // 💯
-        assertEquals("\uD83D\uDCAF", emoji);
     }
 }

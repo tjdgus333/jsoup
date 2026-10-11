@@ -1,6 +1,6 @@
 package org.jsoup.nodes;
 
-import org.jsoup.internal.QuietAppendable;
+import java.io.IOException;
 
 /**
  * A Character Data node, to support CDATA sections.
@@ -16,8 +16,8 @@ public class CDataNode extends TextNode {
     }
 
     /**
-     * Get the un-encoded, <b>non-normalized</b> text content of this CDataNode.
-     * @return un-encoded, non-normalized text
+     * Get the unencoded, <b>non-normalized</b> text content of this CDataNode.
+     * @return unencoded, non-normalized text
      */
     @Override
     public String text() {
@@ -25,11 +25,15 @@ public class CDataNode extends TextNode {
     }
 
     @Override
-    void outerHtmlHead(QuietAppendable accum, Document.OutputSettings out) {
+    void outerHtmlHead(Appendable accum, int depth, Document.OutputSettings out) throws IOException {
         accum
             .append("<![CDATA[")
-            .append(getWholeText())
-            .append("]]>");
+            .append(getWholeText());
+    }
+
+    @Override
+    void outerHtmlTail(Appendable accum, int depth, Document.OutputSettings out) throws IOException {
+        accum.append("]]>");
     }
 
     @Override

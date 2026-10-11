@@ -2,25 +2,15 @@ package org.jsoup.select;
 
 import org.jsoup.Jsoup;
 import org.jsoup.MultiLocaleExtension.MultiLocaleTest;
-import org.jsoup.nodes.CDataNode;
-import org.jsoup.nodes.Comment;
+import org.jsoup.TextUtil;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.jsoup.nodes.Node;
-import org.jsoup.nodes.ProcessingInstruction;
-import org.jsoup.nodes.TextNode;
 import org.jsoup.parser.Parser;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
-import java.util.List;
+import java.util.IdentityHashMap;
 import java.util.Locale;
-import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
-import static org.jsoup.select.EvaluatorDebug.sexpr;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -29,31 +19,16 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author Jonathan Hedley, jonathan@hedley.net
  */
 public class SelectorTest {
-
-    /** Test that the selected elements match exactly the specified IDs. */
-    public static void assertSelectedIds(Elements els, String... ids) {
-        assertNotNull(els);
-        assertEquals(ids.length, els.size(), "Incorrect number of selected elements");
-        for (int i = 0; i < ids.length; i++) {
-            assertEquals(ids[i], els.get(i).id(), "Incorrect content at index");
-        }
-    }
-
-    public static void assertSelectedOwnText(Elements els, String... ownTexts) {
-        assertNotNull(els);
-        assertEquals(ownTexts.length, els.size(), "Incorrect number of selected elements");
-        for (int i = 0; i < ownTexts.length; i++) {
-            assertEquals(ownTexts[i], els.get(i).ownText(), "Incorrect content at index");
-        }
-    }
-
     @Test public void testByTag() {
-        // should be case-insensitive
+        // should be case insensitive
         Elements els = Jsoup.parse("<div id=1><div id=2><p>Hello</p></div></div><DIV id=3>").select("DIV");
-        assertSelectedIds(els, "1", "2", "3");
+        assertEquals(3, els.size());
+        assertEquals("1", els.get(0).id());
+        assertEquals("2", els.get(1).id());
+        assertEquals("3", els.get(2).id());
 
         Elements none = Jsoup.parse("<div id=1><div id=2><p>Hello</p></div></div><div id=3>").select("span");
-        assertTrue(none.isEmpty());
+        assertEquals(0, none.size());
     }
 
     @Test public void byEscapedTag() {
@@ -69,10 +44,12 @@ public class SelectorTest {
 
     @Test public void testById() {
         Elements els = Jsoup.parse("<div><p id=foo>Hello</p><p id=foo>Foo two!</p></div>").select("#foo");
-        assertSelectedOwnText(els, "Hello", "Foo two!");
+        assertEquals(2, els.size());
+        assertEquals("Hello", els.get(0).text());
+        assertEquals("Foo two!", els.get(1).text());
 
         Elements none = Jsoup.parse("<div id=1></div>").select("#foo");
-        assertTrue(none.isEmpty());
+        assertEquals(0, none.size());
     }
 
     @Test public void byEscapedId() {
@@ -90,18 +67,22 @@ public class SelectorTest {
 
     @Test public void testByClass() {
         Elements els = Jsoup.parse("<p id=0 class='ONE two'><p id=1 class='one'><p id=2 class='two'>").select("P.One");
-        assertSelectedIds(els, "0", "1");
+        assertEquals(2, els.size());
+        assertEquals("0", els.get(0).id());
+        assertEquals("1", els.get(1).id());
 
         Elements none = Jsoup.parse("<div class='one'></div>").select(".foo");
-        assertTrue(none.isEmpty());
+        assertEquals(0, none.size());
 
-        Elements els2 = Jsoup.parse("<div class='One-Two' id=1></div>").select(".one-two");
-        assertSelectedIds(els2, "1");
+        Elements els2 = Jsoup.parse("<div class='One-Two'></div>").select(".one-two");
+        assertEquals(1, els2.size());
     }
 
     @Test public void byEscapedClass() {
-        Document doc = Jsoup.parse("<p class='one.two#three'>One</p>");
-        assertSelectedOwnText(doc.select("p.one\\.two\\#three"), "One");
+        Element els = Jsoup.parse("<p class='one.two#three'>One</p>");
+
+        Element one = els.expectFirst("p.one\\.two\\#three");
+        assertEquals("One", one.text());
     }
 
     @Test public void testByClassCaseInsensitive() {
@@ -110,7 +91,8 @@ public class SelectorTest {
         Elements elsFromAttr = Jsoup.parse(html).select("p[class=foo]");
 
         assertEquals(elsFromAttr.size(), elsFromClass.size());
-        assertSelectedOwnText(elsFromClass, "One", "Two", "Three");
+        assertEquals(3, elsFromClass.size());
+        assertEquals("Two", elsFromClass.get(1).text());
     }
 
 
@@ -158,48 +140,46 @@ public class SelectorTest {
         assertEquals("SLIM", contains.last().attr("title"));
     }
 
-    @Test void attributeSelectorHandlesInternalData() {
-        Document doc = Jsoup.parse("<a>");
-        doc.expectFirst("a").attributes().userData("key", "value");
-
-        assertTrue(doc.select("[/jsoup.userdata=foo]").isEmpty());
-    }
-
     @Test public void testNamespacedTag() {
         Document doc = Jsoup.parse("<div><abc:def id=1>Hello</abc:def></div> <abc:def class=bold id=2>There</abc:def>");
         Elements byTag = doc.select("abc|def");
-        assertSelectedIds(byTag, "1", "2");
+        assertEquals(2, byTag.size());
+        assertEquals("1", byTag.first().id());
+        assertEquals("2", byTag.last().id());
 
         Elements byAttr = doc.select(".bold");
-        assertSelectedIds(byAttr, "2");
+        assertEquals(1, byAttr.size());
+        assertEquals("2", byAttr.last().id());
 
         Elements byTagAttr = doc.select("abc|def.bold");
-        assertSelectedIds(byTagAttr, "2");
+        assertEquals(1, byTagAttr.size());
+        assertEquals("2", byTagAttr.last().id());
 
         Elements byContains = doc.select("abc|def:contains(e)");
-        assertSelectedIds(byContains, "1", "2");
+        assertEquals(2, byContains.size());
+        assertEquals("1", byContains.first().id());
+        assertEquals("2", byContains.last().id());
     }
 
     @Test public void testWildcardNamespacedTag() {
         Document doc = Jsoup.parse("<div><abc:def id=1>Hello</abc:def></div> <abc:def class=bold id=2>There</abc:def>");
         Elements byTag = doc.select("*|def");
-        assertSelectedIds(byTag, "1", "2");
+        assertEquals(2, byTag.size());
+        assertEquals("1", byTag.first().id());
+        assertEquals("2", byTag.last().id());
 
         Elements byAttr = doc.select(".bold");
-        assertSelectedIds(byAttr, "2");
+        assertEquals(1, byAttr.size());
+        assertEquals("2", byAttr.last().id());
 
         Elements byTagAttr = doc.select("*|def.bold");
-        assertSelectedIds(byTagAttr, "2");
+        assertEquals(1, byTagAttr.size());
+        assertEquals("2", byTagAttr.last().id());
 
         Elements byContains = doc.select("*|def:contains(e)");
-        assertSelectedIds(byContains, "1", "2");
-    }
-
-    @Test public void testNamespacedWildcardTag() {
-        // https://github.com/jhy/jsoup/issues/1811
-        Document doc = Jsoup.parse("<p>One</p> <ac:p id=2>Two</ac:p> <ac:img id=3>Three</ac:img>");
-        Elements byNs = doc.select("ac|*");
-        assertSelectedIds(byNs, "2", "3");
+        assertEquals(2, byContains.size());
+        assertEquals("1", byContains.first().id());
+        assertEquals("2", byContains.last().id());
     }
 
     @Test public void testWildcardNamespacedXmlTag() {
@@ -209,16 +189,22 @@ public class SelectorTest {
         );
 
         Elements byTag = doc.select("*|Def");
-        assertSelectedIds(byTag, "1", "2");
+        assertEquals(2, byTag.size());
+        assertEquals("1", byTag.first().id());
+        assertEquals("2", byTag.last().id());
 
         Elements byAttr = doc.select(".bold");
-        assertSelectedIds(byAttr, "2");
+        assertEquals(1, byAttr.size());
+        assertEquals("2", byAttr.last().id());
 
         Elements byTagAttr = doc.select("*|Def.bold");
-        assertSelectedIds(byTagAttr, "2");
+        assertEquals(1, byTagAttr.size());
+        assertEquals("2", byTagAttr.last().id());
 
         Elements byContains = doc.select("*|Def:contains(e)");
-        assertSelectedIds(byContains, "1", "2");
+        assertEquals(2, byContains.size());
+        assertEquals("1", byContains.first().id());
+        assertEquals("2", byContains.last().id());
     }
 
     @Test public void testWildCardNamespacedCaseVariations() {
@@ -256,13 +242,18 @@ public class SelectorTest {
     @Test public void testByAttributeRegex() {
         Document doc = Jsoup.parse("<p><img src=foo.png id=1><img src=bar.jpg id=2><img src=qux.JPEG id=3><img src=old.gif><img></p>");
         Elements imgs = doc.select("img[src~=(?i)\\.(png|jpe?g)]");
-        assertSelectedIds(imgs, "1", "2", "3");
+        assertEquals(3, imgs.size());
+        assertEquals("1", imgs.get(0).id());
+        assertEquals("2", imgs.get(1).id());
+        assertEquals("3", imgs.get(2).id());
     }
 
     @Test public void testByAttributeRegexCharacterClass() {
         Document doc = Jsoup.parse("<p><img src=foo.png id=1><img src=bar.jpg id=2><img src=qux.JPEG id=3><img src=old.gif id=4></p>");
         Elements imgs = doc.select("img[src~=[o]]");
-        assertSelectedIds(imgs, "1", "4");
+        assertEquals(2, imgs.size());
+        assertEquals("1", imgs.get(0).id());
+        assertEquals("4", imgs.get(1).id());
     }
 
     @Test public void testByAttributeRegexCombined() {
@@ -420,19 +411,6 @@ public class SelectorTest {
         assertEquals("span", divChilds.get(2).tagName());
     }
 
-    @Test public void streamParentChildStar() {
-        String h = "<div id=1><p>Hello<p><b>there</b></p></div><div id=2><span>Hi</span></div>";
-        Document doc = Jsoup.parse(h);
-
-        List<Element> divChilds = doc.selectStream("div > *")
-            .collect(Collectors.toList());
-
-        assertEquals(3, divChilds.size());
-        assertEquals("p", divChilds.get(0).tagName());
-        assertEquals("p", divChilds.get(1).tagName());
-        assertEquals("span", divChilds.get(2).tagName());
-    }
-
     @Test public void multiChildDescent() {
         String h = "<div id=foo><h1 class=bar><a href=http://example.com/>One</a></h1></div>";
         Document doc = Jsoup.parse(h);
@@ -498,25 +476,6 @@ public class SelectorTest {
 
     @Test public void generalSiblings() {
         String h = "<ol><li id=1>One<li id=2>Two<li id=3>Three</ol>";
-        Document doc = Jsoup.parse(h);
-        Elements els = doc.select("#1 ~ #3");
-        assertEquals(1, els.size());
-        assertEquals("Three", els.first().text());
-    }
-
-    @Test public void elelemtDescendantSkipsNodes() {
-        String h = "<div class=foo> <!-- foo --> <ol> <li>One<li><!-- bar --> Two<li>Three</ol></div>";
-        Document doc = Jsoup.parse(h);
-        Elements els = doc.select(".foo > ol, ol > li + li");
-
-        assertEquals(3, els.size());
-        assertEquals("ol", els.get(0).tagName());
-        assertEquals("Two", els.get(1).text());
-        assertEquals("Three", els.get(2).text());
-    }
-
-    @Test public void siblingsSkipNodes() {
-        String h = "<ol><li id=1><!-- foo -->One<li id=2><!-- foo -->Two<li id=3><!-- foo -->Three</ol>";
         Document doc = Jsoup.parse(h);
         Elements els = doc.select("#1 ~ #3");
         assertEquals(1, els.size());
@@ -631,46 +590,6 @@ public class SelectorTest {
         assertEquals("1", els2.get(1).id());
     }
 
-    @Test public void hasDirectChildren() {
-        Document doc = Jsoup.parse("<div id=empty></div>"
-            + "<div id=child><a href=x></a></div>"
-            + "<div id=deep><section><a href=x></a></section></div>");
-        assertSelectedIds(doc.select("div:has(> a[href])"), "child");
-        assertSelectedIds(doc.select("div:has(> missing)"));
-        // a leading child combinator does not restrict the final candidate to that depth
-        assertSelectedIds(doc.select("div:has(> section a)"), "deep");
-        assertSelectedIds(doc.select("div:has(> section > a)"), "deep");
-    }
-
-    @Test public void hasDirectChildAlternatives() {
-        Document doc = Jsoup.parse("<div id=early><a href=x></a><span></span></div>"
-            + "<div id=late><section></section><span></span></div>"
-            + "<div id=deep><section><span></span></section></div>");
-        String query = "div:has(> a[href], > span)";
-        assertSelectedIds(doc.select(query), "early", "late");
-        assertEquals(doc.getElementById("early"), doc.selectFirst(query));
-        // the unrestricted alternative must still reach deeper descendants
-        assertSelectedIds(doc.select("div:has(> a[href], span)"), "early", "late", "deep");
-    }
-
-    @Test public void hasDirectChildWithNestedHas() {
-        Document doc = Jsoup.parse("<article id=nested><div><section><a></a></section></div></article>"
-            + "<article id=span><span></span></article>"
-            + "<article id=deep><section><span></span></section></article>");
-        // the outer candidate is a child, but its nested predicate searches deeper
-        assertSelectedIds(doc.select("article:has(> div:has(a), > span)"), "nested", "span");
-    }
-
-    @Test public void hasDirectChildNodes() {
-        Document doc = Jsoup.parse("<article id=span><span></span></article>"
-            + "<article id=comment>text<!--direct--></article>"
-            + "<article id=deepComment><section><!--deep--></section></article>");
-        assertSelectedIds(doc.select("article:has(> ::comment)"), "comment");
-        assertSelectedIds(doc.select("article:has(> span, > ::comment)"), "span", "comment");
-        // mixing child and descendant alternatives must include the nested comment
-        assertSelectedIds(doc.select("article:has(> ::comment, section ::comment)"), "comment", "deepComment");
-    }
-
     @Test public void testNestedHas() {
         Document doc = Jsoup.parse("<div><p><span>One</span></p></div> <div><p>Two</p></div>");
         Elements divs = doc.select("div:has(p:has(span))");
@@ -688,119 +607,6 @@ public class SelectorTest {
         assertEquals(1, divs.size());
         assertEquals("div", divs.first().tagName());
         assertEquals("Two", divs.first().text());
-    }
-
-    @Test public void testHasSibling() {
-        // https://github.com/jhy/jsoup/issues/2137
-        Document doc = Jsoup.parse("<h1 id=1>One</h1> <h2>Two</h2> <h1>Three</h1>");
-        Elements els = doc.select("h1:has(+h2)");
-        assertSelectedIds(els, "1");
-
-        els = doc.select("h1:has(~h1)");
-        assertSelectedIds(els, "1");
-
-        // nested with sibling
-        doc = Jsoup.parse("<div id=1><p><i>One</i><i>Two</p><p><i>Three</p></div> <div><p><i>Four</div>");
-        els = doc.select("div:has(p:has(i:has(~i)))");
-        assertSelectedIds(els, "1");
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"#a:has(+ div, > missing)", "#a:has(> missing, + div)"})
-    void hasSiblingAlternatives(String query) {
-        Document doc = Jsoup.parse("<div id=a></div><div><span></span></div>");
-        assertSelectedIds(doc.select("#a:has(+ div)"), "a");
-        // adding an alternative must not lose the existing sibling match
-        assertSelectedIds(doc.select(query), "a");
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"#a:has(+ div span)", "#a:has(+ div > span)", "#a:has(~ div span)"})
-    void hasSiblingDescendant(String query) {
-        Document doc = Jsoup.parse("<div id=a></div><div><span></span></div>");
-        // the matching span is a descendant of the next sibling, not of a
-        assertSelectedIds(doc.select(query), "a");
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"#a:has(+ div span)", "#a:has(~ div span)"})
-    void hasSiblingDeepDescendant(String query) {
-        Document doc = Jsoup.parse("<div id=a></div><div><section><span></span></section></div>");
-        assertSelectedIds(doc.select(query), "a");
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"#a:has(+ div > span)", "#a:has(~ div > span)"})
-    void hasSiblingChildNotGrandchild(String query) {
-        Document doc = Jsoup.parse("<div id=a></div><div><section><span></span></section></div>");
-        assertSelectedIds(doc.select(query));
-    }
-
-    @Test public void hasAdjacentSiblingNotLaterSibling() {
-        Document doc = Jsoup.parse("<div id=a></div><section></section><div><span></span></div>");
-        assertSelectedIds(doc.select("#a:has(+ div span)"));
-    }
-
-    @Test public void hasLaterSiblingDescendant() {
-        Document doc = Jsoup.parse("<div id=a></div><section></section><div><span></span></div>");
-        assertSelectedIds(doc.select("#a:has(~ div span)"), "a");
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {
-        "<div><span></span></div><div id=a></div><div></div>",
-        "<div id=a><span></span></div><div></div>"
-    })
-    void hasSiblingDescendantNotSelfOrPrevious(String html) {
-        Document doc = Jsoup.parse(html);
-        // a span in a preceding sibling or in a itself cannot satisfy a following-sibling query
-        assertSelectedIds(doc.select("#a:has(+ div span)"));
-        assertSelectedIds(doc.select("#a:has(+ div > span)"));
-        assertSelectedIds(doc.select("#a:has(~ div span)"));
-    }
-
-    @Test public void hasSeparateBranchScopes() {
-        Document doc = Jsoup.parse("<div id=a></div><div><span></span></div>");
-        // the span alternative cannot borrow candidates from the sibling alternative
-        assertSelectedIds(doc.select("#a:has(+ div.missing, span)"));
-        assertSelectedIds(doc.select("#a:has(span, + div.missing)"));
-        assertSelectedIds(doc.select("#a:has(+ div:is(:has(span)), > missing)"), "a");
-        assertSelectedIds(doc.select("#a:has(+ div:not(:has(missing)), > missing)"), "a");
-        assertSelectedIds(doc.select("#a:has(div:has(+ span))"));
-    }
-
-    @Test public void hasSiblingContinuation() {
-        Document doc = Jsoup.parse("<div id=a></div><div></div><section><span></span></section>");
-        assertSelectedIds(doc.select("#a:has(+ div + section)"), "a");
-        assertSelectedIds(doc.select("#a:has(+ div + section span)"), "a");
-        assertSelectedIds(doc.select("#a:has(+ div span)"));
-    }
-
-    @Test public void hasSiblingNodes() {
-        Document doc = Jsoup.parse("<div id=a></div>text<!--between--><div><!--inside--></div>");
-        assertSelectedIds(doc.select("#a:has(+ div)"), "a");
-        assertSelectedIds(doc.select("#a:has(+ ::comment)"), "a");
-        assertSelectedIds(doc.select("#a:has(~ ::comment)"), "a");
-        assertSelectedIds(doc.select("#a:has(+ div ::comment)"), "a");
-        assertSelectedIds(doc.select("#a:has(+ div > ::comment)"), "a");
-        assertSelectedIds(doc.select("#a:has(> ::comment)"));
-    }
-
-    @Test public void hasCompiledBranches() {
-        String query = "div:has(+ div span, > a)";
-        Evaluator evaluator = Selector.evaluatorOf(query);
-        Evaluator combined = new CombiningEvaluator.And(new Evaluator.Id("a"), evaluator);
-        // share compiled searches across threads, with independent documents and repeated selections
-        IntStream.range(0, 8).parallel().forEach(i -> {
-            Document doc = Jsoup.parse("<div id=a></div><div><span></span></div><div id=b><a></a></div>");
-            assertEquals(doc.select(query), doc.select(evaluator));
-            assertSelectedIds(doc.select(evaluator), "a", "b");
-            assertEquals(doc.selectFirst(query), doc.selectFirst(evaluator));
-            assertSelectedIds(doc.select(combined), "a");
-            assertTrue(doc.getElementById("a").is(combined));
-            assertEquals(doc.getElementById("a"), doc.getElementById("a").closest(combined));
-            assertSelectedIds(Jsoup.parse("<div id=a></div>").select(evaluator));
-        });
     }
 
     @MultiLocaleTest
@@ -1045,12 +851,14 @@ public class SelectorTest {
         Document doc = Jsoup.parse(html);
 
         Elements found = doc.select("div[class=value ]");
-        assertEquals(1, found.size());
-        assertEquals("class with space", found.get(0).text());
+        assertEquals(2, found.size());
+        assertEquals("class without space", found.get(0).text());
+        assertEquals("class with space", found.get(1).text());
 
         found = doc.select("div[class=\"value \"]");
-        assertEquals(1, found.size());
-        assertEquals("class with space", found.get(0).text());
+        assertEquals(2, found.size());
+        assertEquals("class without space", found.get(0).text());
+        assertEquals("class with space", found.get(1).text());
 
         found = doc.select("div[class=\"value\\ \"]");
         assertEquals(0, found.size());
@@ -1129,10 +937,21 @@ public class SelectorTest {
         assertEquals("One", doc.selectFirst("p, div").text());
     }
 
-    @Test public void rejectsMatchText() {
-        Document doc = Jsoup.parse("<p>One</p>");
-        Selector.SelectorParseException e = assertThrows(Selector.SelectorParseException.class, () -> doc.select(":matchText"));
-        assertEquals(":matchText is no longer supported. Use Element#selectNodes(String, Class) with selector ::text and class TextNode instead.", e.getMessage());
+    @Test public void matchText() {
+        String html = "<p>One<br>Two</p>";
+        Document doc = Jsoup.parse(html);
+        doc.outputSettings().prettyPrint(false);
+        String origHtml = doc.html();
+
+        Elements one = doc.select("p:matchText:first-child");
+        assertEquals("One", one.first().text());
+
+        Elements two = doc.select("p:matchText:last-child");
+        assertEquals("Two", two.first().text());
+
+        assertEquals(origHtml, doc.html());
+
+        assertEquals("Two", doc.select("p:matchText + br + *").text());
     }
 
     @Test public void nthLastChildWithNoParent() {
@@ -1141,17 +960,32 @@ public class SelectorTest {
         assertEquals(0, els.size());
     }
 
-    @Test public void selectTextSplitByBr() {
+    @Test public void splitOnBr() {
         String html = "<div><p>One<br>Two<br>Three</p></div>";
         Document doc = Jsoup.parse(html);
-        String originalHtml = doc.html();
 
-        Nodes<TextNode> text = doc.selectNodes("p ::text", TextNode.class);
-        assertEquals(3, text.size());
-        assertEquals("One", text.get(0).getWholeText());
-        assertEquals("Two", text.get(1).getWholeText());
-        assertEquals("Three", text.get(2).getWholeText());
-        assertEquals(originalHtml, doc.html());
+        Elements els = doc.select("p:matchText");
+        assertEquals(3, els.size());
+        assertEquals("One", els.get(0).text());
+        assertEquals("Two", els.get(1).text());
+        assertEquals("Three", els.get(2).toString());
+    }
+
+    @Test public void matchTextAttributes() {
+        Document doc = Jsoup.parse("<div><p class=one>One<br>Two<p class=two>Three<br>Four");
+        Elements els = doc.select("p.two:matchText:last-child");
+
+        assertEquals(1, els.size());
+        assertEquals("Four", els.text());
+    }
+
+    @Test public void findBetweenSpan() {
+        Document doc = Jsoup.parse("<p><span>One</span> Two <span>Three</span>");
+        Elements els = doc.select("span ~ p:matchText"); // the Two becomes its own p, sibling of the span
+        // todo - think this should really be 'p:matchText span ~ p'. The :matchText should behave as a modifier to expand the nodes.
+
+        assertEquals(1, els.size());
+        assertEquals("Two", els.text());
     }
 
     @Test public void startsWithBeginsWithSpace() {
@@ -1315,7 +1149,7 @@ public class SelectorTest {
         Evaluator eval = QueryParser.parse("p ~ p");
         CombiningEvaluator.And andEval = (CombiningEvaluator.And) eval;
         StructuralEvaluator.PreviousSibling prevEval = (StructuralEvaluator.PreviousSibling) andEval.evaluators.get(0);
-        Map<Node, Map<Node, Boolean>> map = prevEval.threadMemo.get();
+        IdentityHashMap<Element, IdentityHashMap<Element, Boolean>> map = prevEval.threadMemo.get();
         assertEquals(0, map.size()); // no memo yet
 
         Document doc1 = Jsoup.parse("<p>One<p>Two<p>Three");
@@ -1328,7 +1162,7 @@ public class SelectorTest {
         assertEquals(2, s2.size());
         assertEquals("Two2", s2.first().text());
 
-        assertEquals(0, map.size()); // reset after collect
+        assertEquals(1, map.size()); // root of doc 2
     }
 
     @Test public void blankTextNodesAreConsideredEmpty() {
@@ -1338,650 +1172,13 @@ public class SelectorTest {
         Elements empty = doc.select("li:empty");
         Elements notEmpty = doc.select("li:not(:empty)");
 
-        assertSelectedIds(empty, "1", "2", "3");
-        assertSelectedIds(notEmpty, "4", "5");
+        assertEquals(3, empty.size());
+        assertEquals(2, notEmpty.size());
+
+        assertEquals("1", empty.get(0).id());
+        assertEquals("2", empty.get(1).id());
+        assertEquals("3", empty.get(2).id());
+        assertEquals("4", notEmpty.get(0).id());
+        assertEquals("5", notEmpty.get(1).id());
     }
-
-    @Test
-    public void emptyPseudo() {
-        // https://github.com/jhy/jsoup/issues/2130
-        String html = "<ul>" +
-            "  <li id='1'>\n </li>" + // Blank text node only
-            "  <li id='2'></li>" + // No nodes
-            "  <li id='3'><!-- foo --></li>" + // Comment node only
-            "  <li id='4'>One</li>" + // Text node with content
-            "  <li id='5'><span></span></li>" + // Element node
-            "  <li id='6'>\n <span></span></li>" + // Blank text node followed by an element
-            "  <li id='7'><!-- foo --><i></i></li>" + // Comment node with element
-            "</ul>";
-        Document doc = Jsoup.parse(html);
-        Elements empty = doc.select("li:empty");
-        assertSelectedIds(empty, "1", "2", "3");
-
-        Elements notEmpty = doc.select("li:not(:empty)");
-        assertSelectedIds(notEmpty, "4", "5", "6", "7");
-    }
-
-    @Test public void parentFromSpecifiedDescender() {
-        // https://github.com/jhy/jsoup/issues/2018
-        String html = "<ul id=outer><li>Foo</li><li>Bar <ul id=inner><li>Baz</li><li>Qux</li></ul> </li></ul>";
-        Document doc = Jsoup.parse(html);
-
-        Element ul = doc.expectFirst("#outer");
-        assertEquals(2, ul.childrenSize());
-
-        Element li1 = ul.expectFirst("> li:nth-child(1)");
-        assertEquals("Foo", li1.ownText());
-        assertTrue(li1.select("ul").isEmpty());
-
-        Element li2 = ul.expectFirst("> li:nth-child(2)");
-        assertEquals("Bar", li2.ownText());
-
-        // And now for the bug - li2 select was not restricted to the li2 context
-        Elements innerLis = li2.select("ul > li");
-        assertSelectedOwnText(innerLis, "Baz", "Qux");
-
-        // Confirm that parent selector (" ") works same as immediate parent (">");
-        Elements innerLisFromParent = li2.select("ul li");
-        assertEquals(innerLis, innerLisFromParent);
-    }
-
-    @Test public void rootImmediateParentSubquery() {
-        // a combinator at the start of the query is applied to the Root selector. i.e. "> p" matches a P immediately parented
-        // by the Root (which is <html> for a top level query, or the context element in :has)
-        // in the sub query, the combinator was dropped incorrectly
-        String html = "<p id=0><span>A</p> <p id=1><b><i><span>B</p> <p id=2><i>C</p>\n";
-        Document doc = Jsoup.parse(html);
-
-        Elements els = doc.select("p:has(> span, > i)"); // should match a p with an immediate span or i
-        assertSelectedIds(els, "0", "2");
-    }
-
-    @Test public void is() {
-        String html = "<h1 id=1><p></p></h1> <section><h1 id=2></h1></section> <article><h2 id=3></h2></article> <h2 id=4><p></p></h2>";
-        Document doc = Jsoup.parse(html);
-
-        assertSelectedIds(
-            doc.select(":is(section, article) :is(h1, h2, h3)"),
-            "2", "3");
-
-        assertSelectedIds(
-            doc.select(":is(section, article) ~ :is(h1, h2, h3):has(p)"),
-            "4");
-
-        assertSelectedIds(
-            doc.select(":is(h1:has(p), h2:has(section), h3)"),
-            "1");
-
-        assertSelectedIds(
-            doc.select(":is(h1, h2, h3):has(p)"),
-            "1", "4");
-
-        String query = "div :is(h1, h2)";
-        Evaluator parse = QueryParser.parse(query);
-        assertEquals(query, parse.toString());
-    }
-
-    @Test public void orAfterClass() {
-        // see also QueryParserTest#parsesOrAfterAttribute
-        // https://github.com/jhy/jsoup/issues/2073
-        Document doc = Jsoup.parse("<div id=parent><span class=child></span><span class=child></span><span class=child></span></div>");
-        String q = "#parent [class*=child], .some-other-selector .nested";
-        assertEquals("(Or (And (AttributeWithValueContaining '[class*=child]')(Ancestor (Id '#parent')))(And (Class '.nested')(Ancestor (Class '.some-other-selector'))))", sexpr(q));
-        Elements els = doc.select(q);
-        assertEquals(3, els.size());
-    }
-
-    @Test public void emptyAttributePrefix() {
-        // https://github.com/jhy/jsoup/issues/2079
-        // Discovered feature: [^] should find elements with any attribute (any prefix)
-        String html = "<p one>One<p one two>Two<p>Three";
-        Document doc = Jsoup.parse(html);
-
-        Elements els = doc.select("[^]");
-        assertSelectedOwnText(els, "One", "Two");
-
-        Elements emptyAttr = doc.select("p:not([^])");
-        assertSelectedOwnText(emptyAttr, "Three");
-    }
-
-    @Test public void anyAttribute() {
-        // https://github.com/jhy/jsoup/issues/2079
-        String html = "<div id=1><p one>One<p one two>Two<p>Three";
-        Document doc = Jsoup.parse(html);
-
-        Elements els = doc.select("p[*]");
-        assertSelectedOwnText(els, "One", "Two");
-
-        Elements emptyAttr = doc.select("p:not([*])");
-        assertSelectedOwnText(emptyAttr, "Three");
-    }
-
-    @Test void divHasSpanPreceding() {
-        // https://github.com/jhy/jsoup/issues/2187
-        String html = "<div><span>abc</span><a>def</a></div>";
-        String q = "div:has(span + a)";
-
-        Document doc = Jsoup.parse(html);
-        Elements els = doc.select(q);
-        assertEquals(1, els.size());
-        assertEquals("div", els.first().normalName());
-    }
-
-    @Test void divHasDivPreceding() {
-        // https://github.com/jhy/jsoup/issues/2131
-        String html = "<div id=1>\n" +
-            "<div 1><span>hello</span></div>\n" +
-            "<div 2><span>there</span></div>\n" +
-            "\n" +
-            "</div>";
-
-        String q = "div:has(>div + div)";
-
-        Document doc = Jsoup.parse(html);
-        Elements els = doc.select(q);
-        assertEquals(1, els.size());
-        assertEquals("div", els.first().normalName());
-        assertEquals("1", els.first().id());
-    }
-
-    @Test void nestedMultiHas() {
-        // https://github.com/jhy/jsoup/issues/2131
-        String html =
-            "<html>" +
-                "<head></head>" +
-                "<body>" +
-                "<div id=o>" +
-                "<div id=i1><span id=s1>hello</span></div>" +
-                "<div id=i2><span id=s2>world</span></div>" +
-                "</div>" +
-                "</body></html>";
-        Document document = Jsoup.parse(html);
-
-        String q = "div:has(> div:has(> span) + div:has(> span))";
-        Elements els = document.select(q);
-        assertEquals(1, els.size());
-        assertEquals("o", els.get(0).id());
-    }
-
-    @Test void negativeNthChild() {
-        // https://github.com/jhy/jsoup/issues/1147
-        String html = "<p>1</p> <p>2</p> <p>3</p> <p>4</p>";
-        Document doc = Jsoup.parse(html);
-
-        // Digitless
-        Elements pos = doc.select("p:nth-child(n+2)");
-        assertSelectedOwnText(pos, "2", "3", "4");
-
-        Elements neg = doc.select("p:nth-child(-n+2)");
-        assertSelectedOwnText(neg, "1", "2");
-
-        Elements combo = doc.select("p:nth-child(n+2):nth-child(-n+2)");
-        assertSelectedOwnText(combo, "2");
-
-        // Digitful, 2n+2 or -1n+2
-        Elements pos2 = doc.select("p:nth-child(2n+2)");
-        assertSelectedOwnText(pos2, "2", "4");
-
-        Elements neg2 = doc.select("p:nth-child(-1n+2)");
-        assertSelectedOwnText(neg2, "1", "2");
-    }
-
-    // Tests that nested structural and combining evaluators get reset
-    private static class ResetTracker extends Evaluator {
-        boolean resetCalled = false;
-        @Override
-        public boolean matches(Element root, Element element) {
-            return true;
-        }
-
-        @Override
-        protected void reset() {
-            resetCalled = true;
-            super.reset();
-        }
-    }
-
-    @Test void notResetCascades() {
-        ResetTracker track = new ResetTracker();
-        StructuralEvaluator.Not structEval = new StructuralEvaluator.Not(track);
-
-        Document doc = Jsoup.parse("<div><p>Test</p></div>");
-        Element p = doc.expectFirst("p");
-        structEval.matches(doc, p);
-
-        assertFalse(structEval.threadMemo.get().isEmpty());
-        assertFalse(track.resetCalled);
-
-        structEval.reset();
-        assertTrue(structEval.threadMemo.get().isEmpty());
-        assertTrue(track.resetCalled);
-    }
-
-    @Test void testImmediateParentRunCascades() {
-        ResetTracker child = new ResetTracker();
-        ResetTracker parent = new ResetTracker();
-
-        StructuralEvaluator.ImmediateParentRun run = new StructuralEvaluator.ImmediateParentRun(child);
-        run.add(parent);
-
-        Document doc = Jsoup.parse("<div><p><span>Test</span></p></div>");
-        Element span = doc.expectFirst("span");
-        assertTrue(run.matches(doc, span));
-
-        run.reset();
-        assertTrue(child.resetCalled);
-        assertTrue(parent.resetCalled);
-    }
-
-    @Test
-    public void testAncestorChain() {
-        ResetTracker grandParent = new ResetTracker();
-        ResetTracker parent = new ResetTracker();
-        ResetTracker child = new ResetTracker();
-
-        StructuralEvaluator.Ancestor b_needs_a = new StructuralEvaluator.Ancestor(grandParent);
-        StructuralEvaluator.Ancestor c_needs_b = new StructuralEvaluator.Ancestor(parent);
-        CombiningEvaluator.And chain = new CombiningEvaluator.And(child, c_needs_b, b_needs_a);
-
-        Document doc = Jsoup.parse("<div class='A'><p class='B'><span class='C'>Test</span></p></div>");
-        Element span = doc.expectFirst("span");
-        assertTrue(chain.matches(doc, span), "Should match span in correct ancestor chain");
-
-        chain.reset();
-        assertTrue(grandParent.resetCalled);
-        assertTrue(parent.resetCalled);
-        assertTrue(child.resetCalled);
-        assertTrue(b_needs_a.threadMemo.get().isEmpty());
-        assertTrue(c_needs_b.threadMemo.get().isEmpty());
-    }
-
-    @Test void hexDigitUnescape() {
-        // tests the select component of https://github.com/jhy/jsoup/pull/2297, with per-spec escapes
-        // literal is: #\30 \%\ Platform\ Image
-        String html = "<img id='0% Platform Image'>";
-        String q = "#\\30 \\%\\ Platform\\ Image";
-
-        Document doc = Jsoup.parse(html);
-        Element img = doc.expectFirst(q);
-        assertEquals("img", img.tagName());
-    }
-
-    @Test void escapeCssIdentifier() {
-        // thorough tests are in TokenQueue
-        assertEquals("-\\30 a", Selector.escapeCssIdentifier("-0a"));
-        assertEquals("a0b", Selector.escapeCssIdentifier("a0b"));
-    }
-
-    @Test void unescapeCssIdentifier() {
-        // thorough tests are in TokenQueue
-        assertEquals("-0a", Selector.unescapeCssIdentifier("-\\30 a"));
-        assertEquals("a0b", Selector.unescapeCssIdentifier("a0b"));
-    }
-
-    @Test void evaluatorOf() {
-        Evaluator eval = Selector.evaluatorOf("div > p");
-        assertEquals("div > p", eval.toString());
-    }
-
-    @Test void hasComment() {
-        Document doc = Jsoup.parse("<div id=1>One</div><div id=2>Two <!-- foo --></div>");
-        Elements els = doc.select("div:has(::comment)");
-        assertSelectedIds(els, "2");
-    }
-
-    @Test void hasCommentWithText() {
-        Document doc = Jsoup.parse("<div id=1>One <!-- qux bar --></div><div id=2>Two <!-- foo qux --></div>");
-        Elements els = doc.select("div:has(::comment:contains(foo):contains(qux))");
-        assertSelectedIds(els, "2");
-    }
-
-    @Test void descendantComment() {
-        Document doc = Jsoup.parse("<div id=1><div id=2><!-- comment2 --><div id=3><!-- comment3 --></div></div></div><div id=4><div id=5><div id=6>Not</div></div></div>");
-
-        String q = "div > div:has(::comment)";
-        assertEquals("(ImmediateParentRun (Tag 'div')(And (Tag 'div')(Has (InstanceType '::comment'))))", sexpr(q));
-        Elements els1 = doc.select(q);
-        assertSelectedIds(els1, "2", "3");
-
-        String q2 = "div div:has(>::comment:contains(comment3))";
-        assertEquals("(And (Ancestor (Tag 'div'))(And (Tag 'div')(Has (And (InstanceType '::comment')(ContainsValue ':contains(comment3)')))))", sexpr(q2));
-        Elements els2 = doc.select(q2);
-        assertSelectedIds(els2, "3");
-
-        String q3 = "div:has(>::comment) div";
-        assertEquals("(And (Tag 'div')(Ancestor (And (Tag 'div')(Has (InstanceType '::comment')))))", sexpr(q3));
-        Elements els3 = doc.select(q3);
-        assertSelectedIds(els3, "3");
-    }
-
-    @Test void nodeWithElementAncestor() {
-        Document doc = Jsoup.parse("<div id=1><div id=2><p> <!-- comment --></p></div></div>");
-        String q = "div:has(p ::comment)";
-        assertEquals("(And (Tag 'div')(Has (And (InstanceType '::comment')(Ancestor (Tag 'p')))))", sexpr(q));
-        Elements els = doc.select(q);
-        assertSelectedIds(els, "1", "2");
-    }
-
-    @Test void precedingComment() {
-        Document doc = Jsoup.parse("<div><!-- comment --><p id=1><p id=2></div><div><p id=3><p id=4>");
-
-        String q = "::comment ~ p";
-        assertEquals("(And (Tag 'p')(PreviousSibling (InstanceType '::comment')))", sexpr(q));
-        Elements els1 = doc.select(q);
-        assertSelectedIds(els1, "1", "2");
-
-        String q2 = "::comment + p";
-        assertEquals("(And (Tag 'p')(ImmediatePreviousSibling (InstanceType '::comment')))", sexpr(q2));
-        Elements els2 = doc.select(q2);
-        assertSelectedIds(els2, "1");
-    }
-
-    @Test void datanode() {
-        Document doc = Jsoup.parse("<div id=1> <!-- foo --> </div> <div id=2> <script>foo</script> </div> <div><script>bar></script>");
-        String q = "div:has(::data:contains(foo))";
-        assertEquals("(And (Tag 'div')(Has (And (InstanceType '::data')(ContainsValue ':contains(foo)'))))", sexpr(q));
-        Elements els = doc.select(q);
-        assertSelectedIds(els, "2");
-    }
-
-    @Test void leafNode() {
-        Document doc = Jsoup.parse("<div id=1></div><div id=2> </div>");
-        String q = "div:has(::leafnode)";
-        assertEquals("(And (Tag 'div')(Has (InstanceType '::leafnode')))", sexpr(q));
-        Elements els = doc.select(q);
-        assertSelectedIds(els, "2");
-    }
-
-    @Test void leafNodeContains() {
-        Document doc = Jsoup.parse("<div id=1>foo</div><div id=2><!-- bar --></div><div id=3>Bar</div><div id=4><script id=5> Bar </script></div>");
-        String q = "div:has(::leafnode:contains(Bar))";
-        assertEquals("(And (Tag 'div')(Has (And (InstanceType '::leafnode')(ContainsValue ':contains(bar)'))))", sexpr(q));
-        Elements els = doc.select(q);
-        assertSelectedIds(els, "2", "3", "4");
-    }
-
-    @Test void nodeContains() {
-        Document doc = Jsoup.parse("<div><p>One</p></div><div>Two</div>");
-        String q = "div ::node:contains(One)";
-        Nodes<Node> nodes = doc.selectNodes(Selector.evaluatorOf(q));
-        // should have the P and the Text (because nodeValue is ownText)
-        assertEquals(2, nodes.size());
-        assertEquals("One", nodes.get(0).nodeValue());
-        assertEquals("p", nodes.get(0).nodeName());
-        assertEquals("One", nodes.get(1).nodeValue());
-        assertEquals("#text", nodes.get(1).nodeName());
-    }
-
-    @Test void selectComment() {
-        Document doc = Jsoup.parse("<div><!-- find this --></div><!-- and this --><p><!-- not that --></p>");
-        String q = "::comment:contains(this)";
-        assertEquals("(And (InstanceType '::comment')(ContainsValue ':contains(this)'))", sexpr(q));
-        Nodes<Comment> comments = doc.selectNodes(q, Comment.class);
-
-        assertEquals(2, comments.size());
-        assertEquals(" find this ", comments.get(0).getData());
-        assertEquals(" find this ", comments.get(0).nodeValue());
-        assertEquals(" and this ", comments.get(1).getData());
-
-        Nodes<Node> nodes = doc.selectNodes("::comment");
-        assertEquals(3, nodes.size());
-        assertEquals(" find this ", nodes.get(0).nodeValue());
-        assertEquals(" and this ", nodes.get(1).nodeValue());
-        assertEquals(" not that ", nodes.get(2).nodeValue());
-    }
-
-    @Test void selectProcessingInstructions() {
-        String html = "<body><?marker name=country-options mode=Append data-code=abc-123?>" +
-            "<?Marker name=other mode=replace?><?other name=country-options?><!-- name=country-options -->";
-        Document doc = Jsoup.parse(html);
-        ProcessingInstruction marker = doc.expectFirstNode("::pi(marker)", ProcessingInstruction.class);
-
-        assertEquals(3, doc.selectNodes("::pi", ProcessingInstruction.class).size());
-        assertEquals(1, doc.selectNodes("::pi(marker)", ProcessingInstruction.class).size());
-        assertEquals(1, doc.selectNodes("::pi(Marker)", ProcessingInstruction.class).size());
-        assertEquals("name=country-options mode=Append data-code=abc-123", marker.data());
-        assertEquals(2, doc.selectNodes("::pi[name=country-options]", ProcessingInstruction.class).size());
-        assertEquals("name=\"country-options\" mode=\"Append\" data-code=\"abc-123\"", marker.data());
-        assertEquals(1, doc.selectNodes("::pi(marker)[name=country-options]", ProcessingInstruction.class).size());
-
-        assertEquals(2, doc.selectNodes("::pi[mode]", ProcessingInstruction.class).size());
-        assertEquals(1, doc.selectNodes("::pi[data-code=abc-123]", ProcessingInstruction.class).size());
-        assertEquals(2, doc.selectNodes("::pi[mode!=append]", ProcessingInstruction.class).size());
-        assertEquals(2, doc.selectNodes("::pi[name^=country]", ProcessingInstruction.class).size());
-        assertEquals(2, doc.selectNodes("::pi[name$=options]", ProcessingInstruction.class).size());
-        assertEquals(2, doc.selectNodes("::pi[name*=try-opt]", ProcessingInstruction.class).size());
-        assertEquals(2, doc.selectNodes("::pi[name~=^country-]", ProcessingInstruction.class).size());
-        assertEquals(3, doc.selectNodes("::pi[^na]", ProcessingInstruction.class).size());
-        assertEquals(3, doc.selectNodes("::pi[*]", ProcessingInstruction.class).size());
-
-        assertEquals(1, doc.selectNodes("::pi(marker):not([mode=replace]):contains(country-options)", ProcessingInstruction.class).size());
-        assertTrue(doc.selectNodes("::comment[name]", Comment.class).isEmpty());
-        assertTrue(doc.selectNodes("::text[name]", TextNode.class).isEmpty());
-
-        Document blank = Jsoup.parse("<body><?empty?>");
-        assertEquals(1, blank.selectNodes("::pi(empty):blank", ProcessingInstruction.class).size());
-    }
-
-    @Test void selectTextNodes() {
-        Document doc = Jsoup.parse("<p>One</p> <p>Two</p>");
-        Nodes<TextNode> text = doc.selectNodes("p ::text", TextNode.class);
-        assertEquals(2, text.size());
-        assertEquals("One", text.get(0).getWholeText());
-        assertEquals("Two", text.get(1).getWholeText());
-    }
-
-    @Test void elementsViaNodeInterface() {
-        Document doc = Jsoup.parse("<p>One</p> <p>Two</p>");
-        Nodes<Element> ps = doc.selectNodes("p", Element.class);
-        assertEquals(2, ps.size());
-        assertEquals("One", ps.get(0).text());
-        assertEquals("Two", ps.get(1).text());
-    }
-
-    @Test void blankNodes() {
-        Document doc = Jsoup.parse("<p> </p><p><!--  --><!----></p><p>\n</p><p>One</p><p><!-- two --></p>");
-
-        Nodes<Node> nodes = doc.selectNodes("::node:blank", Node.class);
-        assertEquals(12, nodes.size());
-        assertEquals("#document", nodes.get(0).nodeName());
-        assertEquals("html", nodes.get(1).nodeName());
-        assertEquals("head", nodes.get(2).nodeName());
-        assertEquals("body", nodes.get(3).nodeName());
-        assertEquals("p", nodes.get(4).nodeName());
-        assertEquals("#text", nodes.get(5).nodeName());
-        assertEquals("p", nodes.get(6).nodeName());
-        assertEquals("#comment", nodes.get(7).nodeName());
-        assertEquals("#comment", nodes.get(8).nodeName());
-        assertEquals("p", nodes.get(9).nodeName());
-        assertEquals("#text", nodes.get(10).nodeName());
-        assertEquals("p", nodes.get(11).nodeName());
-
-        Nodes<Comment> comments = doc.selectNodes("::comment:blank", Comment.class);
-        assertEquals(2, comments.size());
-        assertEquals("  ", comments.get(0).getData());
-        assertEquals("", comments.get(1).getData());
-
-        String notBlank = "::comment:not(:blank)";
-        Evaluator notBlankEval = QueryParser.parse(notBlank);
-        assertEquals("(And (InstanceType '::comment')(Not (BlankValue ':blank')))", sexpr(notBlankEval));
-        Nodes<Comment> commentsWithData = doc.selectNodes(notBlankEval, Comment.class);
-        assertEquals(1, commentsWithData.size());
-        assertEquals(" two ", commentsWithData.get(0).getData());
-    }
-
-    @Test void blankElements() {
-        Document doc = Jsoup.parse("<p id=1>  </p><p id=2>One</p><p id=3><span>One</span></p>");
-        Elements els = doc.select("p:blank");
-        assertSelectedIds(els, "1", "3");
-    }
-
-    @Test void nonBlankText() {
-        Document doc = Jsoup.parse("<p id=1>  </p><p id=2>One</p><p id=3><span id=4>Two</span></p>");
-        Elements els = doc.select(":not(:blank)");
-        assertSelectedIds(els, "2", "4");
-
-        Nodes<TextNode> text = doc.selectNodes("::text:not(:blank)", TextNode.class);
-        assertEquals(2, text.size());
-        assertEquals("One", text.get(0).getWholeText());
-        assertEquals("Two", text.get(1).getWholeText());
-    }
-
-    @Test void nodeMatches() {
-        Document doc = Jsoup.parse("<p>1234</p> <p>123</p> <p>12</p> <p>1</p> <!--4321--> <!--432--> <!-- 43 -->");
-
-        String regex = "::leafnode:matches(\\d{3,4})";
-        Evaluator eval = Selector.evaluatorOf(regex);
-        assertEquals("(And (InstanceType '::leafnode')(MatchesValue ':matches(\\d{3,4})'))", sexpr(eval));
-
-        Nodes<Node> nodes = doc.selectNodes(eval);
-        assertEquals(4, nodes.size());
-        assertEquals("1234", nodes.get(0).nodeValue());
-        assertEquals("123", nodes.get(1).nodeValue());
-        assertEquals("4321", nodes.get(2).nodeValue());
-        assertEquals("432", nodes.get(3).nodeValue());
-    }
-
-    @Test void notMatchesNodeValues() {
-        Document doc = Jsoup.parse("<p><!--foo--><!--bar--><!--baz--></p>");
-
-        Nodes<Comment> notFoo = doc.selectNodes("::comment:not(:contains(foo))", Comment.class);
-        assertEquals(2, notFoo.size());
-        assertEquals("bar", notFoo.get(0).getData());
-        assertEquals("baz", notFoo.get(1).getData());
-
-        Nodes<Comment> notBa = doc.selectNodes("::comment:not(:matches(^ba))", Comment.class);
-        assertEquals(1, notBa.size());
-        assertEquals("foo", notBa.get(0).getData());
-
-        Nodes<Comment> neither = doc.selectNodes("::comment:not(:contains(foo), :contains(bar))", Comment.class);
-        assertEquals(1, neither.size());
-        assertEquals("baz", neither.get(0).getData());
-    }
-
-    @Test void nestedNodeSelectorKeepsOuterContext() {
-        Document doc = Jsoup.parse("<p><!--foo--><!--bar--></p>");
-        Nodes<Comment> comments = doc.selectNodes("::comment:not(::text):contains(foo)", Comment.class);
-        assertEquals(1, comments.size());
-        assertEquals("foo", comments.get(0).getData());
-    }
-
-    @Test void cdataNodes() {
-        String xml = "<body><![CDATA[One]]><p>Two</p><![CDATA[Three]]><x><![CDATA[ ]]></body>";
-        Document doc = Jsoup.parse(xml, Parser.xmlParser());
-
-        // via leafnode:
-        Nodes<CDataNode> leafnodes = doc.selectNodes("::leafnode", CDataNode.class);
-        assertEquals(3, leafnodes.size());
-
-        // cdata via unfiltered
-        Nodes<Node> nodes = doc.selectNodes("::cdata");
-        assertEquals(3, nodes.size());
-
-        // (not) blank:
-        Nodes<CDataNode> notBlanks = doc.selectNodes("::cdata:not(:blank)", CDataNode.class);
-        assertEquals(2, notBlanks.size());
-        assertEquals("One", notBlanks.get(0).nodeValue());
-        assertEquals("Three", notBlanks.get(1).nodeValue());
-
-        // contains:
-        Nodes<CDataNode> contains = doc.selectNodes("::cdata:contains(One)", CDataNode.class);
-        assertEquals(1, contains.size());
-        assertEquals("One", contains.get(0).nodeValue());
-
-        // matches:
-        Nodes<CDataNode> matches = doc.selectNodes("::cdata:matches(re)", CDataNode.class);
-        assertEquals(1, matches.size());
-        assertEquals("Three", matches.get(0).nodeValue());
-    }
-
-    @Test void unknownPseudoNodeSelectError() {
-        Exception ex = assertThrows(
-            Selector.SelectorParseException.class,
-            () -> Selector.evaluatorOf("::unknown:contains(foo)")
-        );
-        assertEquals(
-            "Could not parse query '::unknown:contains(foo)': unknown node type '::unknown'",
-            ex.getMessage()
-        );
-    }
-
-    @Test void attributeSelectorQuotedWhitespace() {
-        // https://github.com/jhy/jsoup/issues/2380
-        Document doc = Jsoup.parse(
-            "<div id=1 data=foobar></div>" +
-                "<div id=2 data=' foobar '></div>" +
-                "<div id=3 data='xfoobarx'></div>"
-        );
-
-        // match: literal compare (no trimming)
-        assertSelectedIds(doc.select("div[data=\"foobar\"]"), "1");
-        assertSelectedIds(doc.select("div[data=\" foobar \"]"), "2");
-
-        // prefix
-        assertSelectedIds(doc.select("div[data^=\"foo\"]"), "1");
-        assertSelectedIds(doc.select("div[data^=\" foo\"]"), "2");
-
-        // suffix
-        assertSelectedIds(doc.select("div[data$=\"bar\"]"), "1");
-        assertSelectedIds(doc.select("div[data$=\"bar \"]"), "2");
-
-        // contains
-        assertSelectedIds(doc.select("div[data*=\"foobar\"]"), "1", "2", "3");
-        assertSelectedIds(doc.select("div[data*=\" foobar \"]"), "2");
-    }
-
-    @Test void canSelectBlankAttribute() {
-        Document doc = Jsoup.parse(
-            "<div id=1 data=''></div>" +
-                "<div id=2 data></div>" +
-                "<div id=3 data=one></div>"
-        );
-
-        assertSelectedIds(doc.select("div[data]"), "1", "2", "3");
-        assertSelectedIds(doc.select("div[data='']"), "1", "2");
-        assertSelectedIds(doc.select("div[data=]"), "1", "2");
-
-        assertSelectedIds(doc.select("div[data^='']"), "1", "2", "3");
-        assertSelectedIds(doc.select("div[data$='']"), "1", "2", "3");
-        assertSelectedIds(doc.select("div[data*='']"), "1", "2", "3");
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"[abs:!=]", "[ abs:^=]"})
-    void parseExceptionOnEmptyAbsKey(String query) {
-        Selector.SelectorParseException ex = assertThrows(
-            Selector.SelectorParseException.class,
-            () -> Selector.evaluatorOf(query)
-        );
-        assertEquals("Absolute attribute key must have a name", ex.getMessage());
-    }
-
-    @Test void parseExceptionOnEmptyKeyVal() {
-        // was previously firing at match time, not eval time
-        String q = "[\"=\"]";
-        boolean threw = false;
-        try {
-            Evaluator e = Selector.evaluatorOf(q);
-        } catch (Selector.SelectorParseException ex) {
-            threw = true;
-            assertEquals("Quoted value must have content", ex.getMessage());
-        }
-        assertTrue(threw);
-    }
-
-
-    @Test void nameMatchingUsesAsciiButTextMatchingUsesUnicode() {
-        Document doc = Jsoup.parse("<x-Ä data-Ä='VALUE'>Äpfel</x-Ä><x-ä data-ä='value'>Other</x-ä>");
-        assertEquals("Äpfel", doc.select("X-Ä").text());
-        assertEquals("Other", doc.select("x-ä").text());
-        assertEquals("Äpfel", doc.select("[DATA-Ä]").text());
-        assertEquals("Äpfel", doc.select("[DATA-Ä=value]").text());
-        assertEquals("Äpfel", doc.select("[^DATA-Ä]").text());
-        assertEquals("Äpfel", doc.select("x-Ä:contains(äPFEL)").text());
-        Element el = new Element(new org.jsoup.parser.Tag("x "), "");
-        el.text("Space");
-        assertEquals("Space", el.select("x\\ :not(p)").text());
-    }
-
 }

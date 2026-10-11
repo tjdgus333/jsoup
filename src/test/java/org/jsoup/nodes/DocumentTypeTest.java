@@ -61,24 +61,6 @@ public class DocumentTypeTest {
         String legacyDoc = "<!DOCTYPE html SYSTEM \"about:legacy-compat\">";
         assertEquals(legacyDoc, htmlOutput(legacyDoc));
         assertEquals(legacyDoc, xmlOutput(legacyDoc));
-
-        // round trips internal subset in xml; dropped in html
-        String internalSubset = "<!DOCTYPE svg SYSTEM \"example.dtd\" [<!ENTITY ns_extend \"http://ns.adobe.com/Extensibility/1.0/\">]>";
-        assertEquals("<!DOCTYPE svg SYSTEM \"example.dtd\">", htmlOutput(internalSubset));
-        assertEquals(internalSubset, xmlOutput(internalSubset));
-
-        String emptySubset = "<!DOCTYPE root []>";
-        assertEquals("<!doctype root>", htmlOutput(emptySubset));
-        assertEquals(emptySubset, xmlOutput(emptySubset));
-    }
-
-    @Test void systemIdentifierUsesSafeQuote() {
-        // use a delimiter that does not occur in the system identifier
-        String doubleQuote = "<!DOCTYPE root SYSTEM 'a\"b.dtd'>";
-        assertEquals(doubleQuote, xmlOutput(doubleQuote));
-
-        String singleQuote = "<!DOCTYPE root SYSTEM \"a'b.dtd\">";
-        assertEquals(singleQuote, xmlOutput(singleQuote));
     }
 
     private String htmlOutput(String in) {
@@ -88,24 +70,5 @@ public class DocumentTypeTest {
 
     private String xmlOutput(String in) {
         return Jsoup.parse(in, "", Parser.xmlParser()).childNode(0).outerHtml();
-    }
-
-    @Test void attributes() {
-        Document doc = Jsoup.parse("<!DOCTYPE html>");
-        DocumentType doctype = doc.documentType();
-        assertEquals("#doctype", doctype.nodeName());
-        assertEquals("html", doctype.name());
-        assertEquals("html", doctype.attr("name"));
-        assertEquals("", doctype.publicId());
-        assertEquals("", doctype.systemId());
-
-        doc = Jsoup.parse("<!DOCTYPE notHtml PUBLIC \"--public\" \"--system\">");
-        doctype = doc.documentType();
-
-        assertEquals("#doctype", doctype.nodeName());
-        assertEquals("nothtml", doctype.name());
-        assertEquals("nothtml", doctype.attr("name"));
-        assertEquals("--public", doctype.publicId());
-        assertEquals("--system", doctype.systemId());
     }
 }

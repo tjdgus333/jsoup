@@ -1,7 +1,7 @@
 /**
  HTML document structure nodes.
  */
-@NullMarked
+@NonnullByDefault
 package org.jsoup.nodes;
 
-import org.jspecify.annotations.NullMarked;
+import org.jsoup.internal.NonnullByDefault;

@@ -1,13 +1,10 @@
 package org.jsoup.nodes;
 
 import org.jsoup.Jsoup;
-import org.jsoup.parser.Parser;
 import org.jsoup.select.Elements;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -88,7 +85,7 @@ public class ElementIT {
         Document doc = new Document("https://example.com/");
         Element el = doc.body();
         for (int i = 0; i <= 50000; i++) {
-            el = el.appendChild(doc.createElement("p")).firstElementChild();
+            el = el.appendElement("p");
         }
         assertFalse(doc.hasText());
         el.text("Hello");
@@ -101,7 +98,7 @@ public class ElementIT {
         Document doc = new Document("https://example.com/");
         Element el = doc.body();
         for (int i = 0; i <= 50000; i++) {
-            el = el.appendChild(doc.createElement("p")).firstElementChild();
+            el = el.appendElement("p");
         }
         Element script = el.appendElement("script");
         script.text("script"); // holds data nodes, so inserts as data, not text
@@ -116,7 +113,7 @@ public class ElementIT {
         Element el = doc.body();
         int num = 50000;
         for (int i = 0; i <= num; i++) {
-            el = el.appendChild(doc.createElement("p")).firstElementChild();
+            el = el.appendElement("p");
         }
         Elements parents = el.parents();
         assertEquals(num+2, parents.size()); // +2 for html and body
@@ -126,7 +123,6 @@ public class ElementIT {
     @Test void wrapNoOverflow() {
         // deepChild was recursive, so could overflow if presented with a fairly insane wrap
         Document doc = new Document("https://example.com/");
-        doc.parser().setMaxDepth(Integer.MAX_VALUE); // don't limit to 512
         Element el = doc.body().appendElement("p");
         int num = 50000;
         StringBuilder sb = new StringBuilder();
@@ -136,96 +132,6 @@ public class ElementIT {
         el.wrap(sb.toString());
         String html = doc.body().html();
         assertTrue(html.startsWith("<div>"));
-        assertEquals(num + 3, el.parents().size()); // + 3 is for body, html, document
-    }
-
-    @Test
-    public void testConcurrentMerge() throws Exception {
-        // https://github.com/jhy/jsoup/discussions/2280 / https://github.com/jhy/jsoup/issues/2281
-        // This was failing because the template.clone().append(html) was reusing the same underlying parser object.
-        // Document#clone now correctly clones its parser.
-
-        class TemplateMerger {
-            private final Document templateDoc;
-
-            public TemplateMerger(Document template) {
-                this.templateDoc = template;
-            }
-
-            public Document mergeWith(Document inputDoc) {
-                Document merged = templateDoc.clone();
-                Element content = merged.getElementById("content");
-                content.append(inputDoc.html());
-                return merged;
-            }
-        }
-
-        String templateHtml = "<html><body><div id='content'></div></body></html>";
-        Document templateDoc = Jsoup.parse(templateHtml);
-        TemplateMerger merger = new TemplateMerger(templateDoc);
-
-        Runnable mergeTask = () -> {
-            try {
-                for (int i = 0; i < 1000; i++) {
-                    String inputHtml = "<html><body><p>Some content</p></body></html>";
-                    Document inputDoc = Jsoup.parse(inputHtml);
-                    Document merged = merger.mergeWith(inputDoc);
-                    assertNotNull(merged);
-                }
-            } catch (Exception e) {
-                fail(e);
-            }
-        };
-
-        int threadCount = 10;
-        Thread[] threads = new Thread[threadCount];
-        for (int i = 0; i < threadCount; i++) {
-            threads[i] = new Thread(mergeTask);
-            threads[i].start();
-        }
-        for (Thread t : threads) {
-            t.join();
-        }
-    }
-
-    @Test
-    void concurrentChildren() throws InterruptedException {
-        int childCount = 200;
-
-        Document doc = Jsoup.parse("<div></div>");
-        Element div = doc.expectFirst("div");
-        for (int i = 0; i < childCount; i++) {
-            div.appendElement("p").after("Some text");
-        }
-
-        int threadCount = 100;
-        int iterCount = 10000;
-        CountDownLatch startLatch = new CountDownLatch(1);
-        CountDownLatch endLatch = new CountDownLatch(threadCount);
-        AtomicReference<Throwable> failure = new AtomicReference<>();
-
-        for (int i = 0; i < threadCount; i++) {
-            Thread t = new Thread(() -> {
-                try {
-                    startLatch.await();
-                    for (int j = 0; j < iterCount; j++) {
-                        Elements children = div.children();
-                        assertEquals(childCount, children.size());
-                    }
-                } catch (Throwable e) {
-                    System.err.println(e);
-                    failure.set(e);
-                } finally {
-                    endLatch.countDown();
-                }
-            });
-            t.start();
-        }
-
-        startLatch.countDown();
-        endLatch.await();
-        if (failure.get() != null) {
-            throw new AssertionError(failure.get());
-        }
+        assertEquals(num + 3, el.parents().size());
     }
 }

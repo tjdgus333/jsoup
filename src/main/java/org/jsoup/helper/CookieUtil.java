@@ -2,11 +2,9 @@ package org.jsoup.helper;
 
 import org.jsoup.Connection;
 import org.jsoup.internal.StringUtil;
-import org.jsoup.parser.CharacterReader;
-import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
-import java.net.CookieManager;
+import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -18,7 +16,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.BiConsumer;
 
 /**
  Helper functions to support the Cookie Manager / Cookie Storage in HttpConnection.
@@ -35,7 +32,7 @@ class CookieUtil {
      Pre-request, get any applicable headers out of the Request cookies and the Cookie Store, and add them to the request
      headers. If the Cookie Store duplicates any Request cookies (same name and value), they will be discarded.
      */
-    static void applyCookiesToRequest(HttpConnection.Request req, BiConsumer<String, String> setter) throws IOException {
+    static void applyCookiesToRequest(HttpConnection.Request req, HttpURLConnection con) throws IOException {
         // Request key/val cookies. LinkedHashSet used to preserve order, as cookie store will return most specific path first
         Set<String> cookieSet = requestCookieSet(req);
         Set<String> cookies2 = null;
@@ -62,9 +59,9 @@ class CookieUtil {
         }
 
         if (cookieSet.size() > 0)
-            setter.accept(CookieName, StringUtil.join(cookieSet, Sep));
+            con.addRequestProperty(CookieName, StringUtil.join(cookieSet, Sep));
         if (cookies2 != null && cookies2.size() > 0)
-            setter.accept(Cookie2Name, StringUtil.join(cookies2, Sep));
+            con.addRequestProperty(Cookie2Name, StringUtil.join(cookies2, Sep));
     }
 
     private static LinkedHashSet<String> requestCookieSet(Connection.Request req) {
@@ -86,35 +83,8 @@ class CookieUtil {
         }
     }
 
-    /** Store the Result cookies into the cookie manager, and place relevant cookies into the Response object. */
-    static void storeCookies(HttpConnection.Request req, HttpConnection.Response res, URL url, Map<String, List<String>> resHeaders) throws IOException {
-        CookieManager manager = req.cookieManager();
-        URI uri = CookieUtil.asUri(url);
-        manager.put(uri, resHeaders); // stores cookies for session
+    static void storeCookies(HttpConnection.Request req, URL url, Map<String, List<String>> resHeaders) throws IOException {
+        req.cookieManager().put(CookieUtil.asUri(url), resHeaders); // stores cookies for session
 
-        // set up the simple cookies() map
-        // the response may include cookies that are not relevant to this request, but users may require them if they are not using the cookie manager (setting request cookies only from the simple cookies() response):
-        for (Map.Entry<String, List<String>> entry : resHeaders.entrySet()) {
-            String name = entry.getKey();
-            List<String> values = entry.getValue();
-            if (name.equalsIgnoreCase("Set-Cookie")) {
-                for (String value : values) {
-                    parseCookie(value, res);
-                }
-            }
-        }
-    }
-
-    static void parseCookie(@Nullable String value, HttpConnection.Response res) {
-        if (value == null) return;
-        CharacterReader reader = new CharacterReader(value);
-        String cookieName = reader.consumeTo('=').trim();
-        reader.advance();
-        String cookieVal = reader.consumeTo(';').trim();
-        // ignores path, date, domain, validateTLSCertificates et al. full details will be available in cookiestore if required
-        // name not blank, value not null
-        if (!cookieName.isEmpty())
-            res.cookie(cookieName, cookieVal); // if duplicate names, last set will win
-        reader.close();
     }
 }

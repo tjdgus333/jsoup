@@ -2,57 +2,46 @@ package org.jsoup.select;
 
 import org.jsoup.internal.StringUtil;
 import org.jsoup.nodes.Element;
-import org.jsoup.nodes.LeafNode;
 import org.jsoup.nodes.Node;
 
 import java.util.ArrayList;
-import java.util.Map;
-import java.util.WeakHashMap;
+import java.util.IdentityHashMap;
 
 /**
  * Base structural evaluator.
  */
 abstract class StructuralEvaluator extends Evaluator {
     final Evaluator evaluator;
-    boolean wantsNodes; // if the evaluator requested nodes, not just elements
 
     public StructuralEvaluator(Evaluator evaluator) {
         this.evaluator = evaluator;
-        wantsNodes = evaluator.wantsNodes();
-    }
-
-    @Override
-    boolean wantsNodes() {
-        return wantsNodes;
     }
 
     // Memoize inner matches, to save repeated re-evaluations of parent, sibling etc.
     // root + element: Boolean matches. ThreadLocal in case the Evaluator is compiled then reused across multi threads
-    final ThreadLocal<Map<Node, Map<Node, Boolean>>> threadMemo = ThreadLocal.withInitial(WeakHashMap::new);
+    final ThreadLocal<IdentityHashMap<Element, IdentityHashMap<Element, Boolean>>>
+        threadMemo = ThreadLocal.withInitial(IdentityHashMap::new);
 
-    boolean memoMatches(final Element root, final Node node) {
-        Map<Node, Map<Node, Boolean>> rootMemo = threadMemo.get();
-        Map<Node, Boolean> memo = rootMemo.computeIfAbsent(root, r -> new WeakHashMap<>());
-        return memo.computeIfAbsent(node, test -> evaluator.matches(root, test));
+    boolean memoMatches(final Element root, final Element element) {
+        // not using computeIfAbsent, as the lambda impl requires a new Supplier closure object on every hit: tons of GC
+        IdentityHashMap<Element, IdentityHashMap<Element, Boolean>> rootMemo = threadMemo.get();
+        IdentityHashMap<Element, Boolean> memo = rootMemo.get(root);
+        if (memo == null) {
+            memo = new IdentityHashMap<>();
+            rootMemo.put(root, memo);
+        }
+        Boolean matches = memo.get(element);
+        if (matches == null) {
+            matches = evaluator.matches(root, element);
+            memo.put(element, matches);
+        }
+        return matches;
     }
 
     @Override protected void reset() {
-        threadMemo.remove();
-        evaluator.reset();
+        threadMemo.get().clear();
         super.reset();
     }
-
-    @Override
-    public boolean matches(Element root, Element element) {
-        return evaluateMatch(root, element);
-    }
-
-    @Override
-    boolean matches(Element root, LeafNode leafNode) {
-        return evaluateMatch(root, leafNode);
-    }
-
-    abstract boolean evaluateMatch(Element root, Node node);
 
     static class Root extends Evaluator {
         @Override
@@ -65,28 +54,39 @@ abstract class StructuralEvaluator extends Evaluator {
         }
 
         @Override public String toString() {
-            return ">";
+            return "";
         }
     }
 
-    /** Implements the :is(sub-query) pseudo-selector */
-    static class Is extends StructuralEvaluator {
-        public Is(Evaluator evaluator) {
+    static class Has extends StructuralEvaluator {
+        final Collector.FirstFinder finder;
+
+        public Has(Evaluator evaluator) {
             super(evaluator);
+            finder = new Collector.FirstFinder(evaluator);
         }
 
         @Override
-        boolean evaluateMatch(Element root, Node node) {
-            return evaluator.matches(root, node);
+        public boolean matches(Element root, Element element) {
+            // for :has, we only want to match children (or below), not the input element. And we want to minimize GCs
+            for (int i = 0; i < element.childNodeSize(); i++) {
+                Node node = element.childNode(i);
+                if (node instanceof Element) {
+                    Element match = finder.find(element, (Element) node);
+                    if (match != null)
+                        return true;
+                }
+            }
+            return false;
         }
 
         @Override protected int cost() {
-            return 2 + evaluator.cost();
+            return 10 * evaluator.cost();
         }
 
         @Override
         public String toString() {
-            return String.format(":is(%s)", evaluator);
+            return String.format(":has(%s)", evaluator);
         }
     }
 
@@ -96,8 +96,8 @@ abstract class StructuralEvaluator extends Evaluator {
         }
 
         @Override
-        boolean evaluateMatch(Element root, Node node) {
-            return !memoMatches(root, node);
+        public boolean matches(Element root, Element element) {
+            return !memoMatches(root, element);
         }
 
         @Override protected int cost() {
@@ -110,31 +110,29 @@ abstract class StructuralEvaluator extends Evaluator {
         }
     }
 
-    /**
-     Any Ancestor (i.e., ascending parent chain.).
-     */
-    static class Ancestor extends StructuralEvaluator {
-        public Ancestor(Evaluator evaluator) {
+    static class Parent extends StructuralEvaluator {
+        public Parent(Evaluator evaluator) {
             super(evaluator);
         }
 
         @Override
-        boolean evaluateMatch(Element root, Node node) {
-            if (root == node)
+        public boolean matches(Element root, Element element) {
+            if (root == element)
                 return false;
 
-            for (Node parent = node.parent(); parent != null; parent = parent.parent()) {
+            Element parent = element.parent();
+            while (parent != null) {
                 if (memoMatches(root, parent))
                     return true;
                 if (parent == root)
                     break;
+                parent = parent.parent();
             }
             return false;
         }
 
-        @Override
-        protected int cost() {
-            return 8 * evaluator.cost(); // probably lower than has(), but still significant, depending on doc and el depth.
+        @Override protected int cost() {
+            return 2 * evaluator.cost();
         }
 
         @Override
@@ -144,15 +142,42 @@ abstract class StructuralEvaluator extends Evaluator {
     }
 
     /**
+     @deprecated replaced by {@link  ImmediateParentRun}
+     */
+    @Deprecated
+    static class ImmediateParent extends StructuralEvaluator {
+        public ImmediateParent(Evaluator evaluator) {
+            super(evaluator);
+        }
+
+        @Override
+        public boolean matches(Element root, Element element) {
+            if (root == element)
+                return false;
+
+            Element parent = element.parent();
+            return parent != null && memoMatches(root, parent);
+        }
+
+        @Override protected int cost() {
+            return 1 + evaluator.cost();
+        }
+
+        @Override
+        public String toString() {
+            return String.format("%s > ", evaluator);
+        }
+    }
+
+    /**
      Holds a list of evaluators for one > two > three immediate parent matches, and the final direct evaluator under
      test. To match, these are effectively ANDed together, starting from the last, matching up to the first.
      */
-    static class ImmediateParentRun extends StructuralEvaluator {
+    static class ImmediateParentRun extends Evaluator {
         final ArrayList<Evaluator> evaluators = new ArrayList<>();
         int cost = 2;
 
         public ImmediateParentRun(Evaluator evaluator) {
-            super(evaluator);
             evaluators.add(evaluator);
             cost += evaluator.cost();
         }
@@ -160,35 +185,24 @@ abstract class StructuralEvaluator extends Evaluator {
         void add(Evaluator evaluator) {
             evaluators.add(evaluator);
             cost += evaluator.cost();
-            wantsNodes |= evaluator.wantsNodes();
         }
 
-        @Override boolean evaluateMatch(Element root, Node node) {
-            if (node == root)
-                return false; // cannot match as the second eval (first parent test) would be above the root
-
+        @Override
+        public boolean matches(Element root, Element element) {
+            // evaluate from last to first
             for (int i = evaluators.size() -1; i >= 0; --i) {
-                if (node == null)
+                if (element == null)
                     return false;
                 Evaluator eval = evaluators.get(i);
-                if (!eval.matches(root, node))
+                if (!eval.matches(root, element))
                     return false;
-                if (i > 0)
-                    node = node.parent();
+                element = element.parent();
             }
             return true;
         }
 
         @Override protected int cost() {
             return cost;
-        }
-
-        @Override
-        protected void reset() {
-            for (Evaluator evaluator : evaluators) {
-                evaluator.reset();
-            }
-            super.reset();
         }
 
         @Override
@@ -202,13 +216,15 @@ abstract class StructuralEvaluator extends Evaluator {
             super(evaluator);
         }
 
-        // matches any previous sibling, so can be same in Element only or wantsNodes context
-        @Override boolean evaluateMatch(Element root, Node node) {
-            if (root == node) return false;
+        @Override
+        public boolean matches(Element root, Element element) {
+            if (root == element) return false;
 
-            for (Node sib = node.firstSibling(); sib != null; sib = sib.nextSibling()) {
-                if (sib == node) break;
-                if (memoMatches(root, sib)) return true;
+            Element sibling = element.firstElementSibling();
+            while (sibling != null) {
+                if (sibling == element) break;
+                if (memoMatches(root, sibling)) return true;
+                sibling = sibling.nextElementSibling();
             }
 
             return false;
@@ -229,10 +245,12 @@ abstract class StructuralEvaluator extends Evaluator {
             super(evaluator);
         }
 
-        @Override boolean evaluateMatch(Element root, Node node) {
-            if (root == node) return false;
+        @Override
+        public boolean matches(Element root, Element element) {
+            if (root == element)
+                return false;
 
-            Node prev = wantsNodes ? node.previousSibling() : node.previousElementSibling();
+            Element prev = element.previousElementSibling();
             return prev != null && memoMatches(root, prev);
         }
 
