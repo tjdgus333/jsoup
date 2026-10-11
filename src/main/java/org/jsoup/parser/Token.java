@@ -290,8 +290,8 @@ abstract class Token {
             }
         }
 
-        @Override
-        abstract public String toString();
+        @Overridepublic abstract 
+String toString();
     }
 
     final static class StartTag extends Tag {
@@ -513,3 +513,4 @@ abstract class Token {
         EOF
     }
 }
+
