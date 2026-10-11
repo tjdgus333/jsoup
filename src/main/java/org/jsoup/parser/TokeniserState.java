@@ -927,8 +927,7 @@ enum TokeniserState {
             } else if (r.matchConsume("[CDATA[")) {
                 // todo: should actually check current namespace, and only non-html allows cdata. until namespace
                 // is implemented properly, keep handling as cdata
-                //} else if (!t.currentNodeInHtmlNS() && r.matchConsume("[CDATA[")) {
-                t.createTempBuffer();
+                                t.createTempBuffer();
                 t.transition(CdataSection);
             } else {
                 t.error(this);
@@ -1743,3 +1742,4 @@ enum TokeniserState {
         }
     }
 }
+
