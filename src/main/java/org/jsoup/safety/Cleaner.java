@@ -164,6 +164,7 @@ public class Cleaner {
             }
         }
 
+        @Override
         public void tail(Node source, int depth) {
             if (source instanceof Element && safelist.isSafeTag(source.nodeName())) {
                 destination = destination.parent(); // would have descended, so pop destination stack
@@ -214,3 +215,4 @@ public class Cleaner {
     }
 
 }
+
