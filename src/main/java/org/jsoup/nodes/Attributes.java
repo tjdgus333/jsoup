@@ -551,6 +551,7 @@ public class Attributes implements Iterable<Attribute>, Cloneable {
                 return new Attribute(attr.getKey().substring(dataPrefix.length()), attr.getValue());
             }
 
+            @Override
             public void remove() {
                 attributes.remove(attr.getKey());
             }
@@ -569,3 +570,4 @@ public class Attributes implements Iterable<Attribute>, Cloneable {
         return key != null && key.length() > 1 && key.charAt(0) == InternalPrefix;
     }
 }
+
