@@ -332,9 +332,7 @@ final class Tokeniser {
     boolean currentNodeInHtmlNS() {
         // todo: implement namespaces correctly
         return true;
-        // Element currentNode = currentNode();
-        // return currentNode != null && currentNode.namespace().equals("HTML");
-    }
+                    }
 
     /**
      * Utility method to consume reader and unescape entities found within.
@@ -361,3 +359,4 @@ final class Tokeniser {
         return StringUtil.releaseBuilder(builder);
     }
 }
+
