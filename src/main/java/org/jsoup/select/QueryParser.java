@@ -17,7 +17,7 @@ import static org.jsoup.internal.Normalizer.normalize;
  */
 public class QueryParser {
     private final static char[] Combinators = {',', '>', '+', '~', ' '};
-    private final static String[] AttributeEvals = new String[]{"=", "!=", "^=", "$=", "*=", "~="};
+    private static final String[] AttributeEvals = new String[]{"=", "!=", "^=", "$=", "*=", "~="};
 
     private final TokenQueue tq;
     private final String query;
@@ -426,3 +426,4 @@ public class QueryParser {
         return query;
     }
 }
+
