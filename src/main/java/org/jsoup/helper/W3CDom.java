@@ -358,7 +358,7 @@ public class W3CDom {
             contextElement = (org.jsoup.nodes.Element) doc.getUserData(ContextProperty); // Track the context jsoup Element, so we can save the corresponding w3c element
             final org.jsoup.nodes.Document inDoc = contextElement.ownerDocument();
             if (namespaceAware && inDoc != null && inDoc.parser().getTreeBuilder() instanceof HtmlTreeBuilder) {
-              // as per the WHATWG HTML5 spec Â§ 2.1.3, elements are in the HTML namespace by default
+              // as per the WHATWG HTML5 spec ¡× 2.1.3, elements are in the HTML namespace by default
               namespacesStack.peek().put("", Parser.NamespaceHtml);
             }
           }
@@ -410,6 +410,7 @@ public class W3CDom {
             dest.appendChild(append);
         }
 
+        @Override
         public void tail(org.jsoup.nodes.Node source, int depth) {
             if (source instanceof org.jsoup.nodes.Element && dest.getParentNode() instanceof Element) {
                 dest = dest.getParentNode(); // undescend
@@ -453,3 +454,4 @@ public class W3CDom {
 
     }
 }
+
